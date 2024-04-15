@@ -396,6 +396,8 @@ If regex is specified only function arguments with a name matching it will be re
 The name of variables that are shadowed in the current scope will be shown in parenthesis.
 
 If regex is specified only local variables with a name matching it will be returned. If -v is specified more information about each local variable will be shown.`},
+		{aliases: []string{"objref"}, allowedPrefixes: onPrefix | deferredPrefix, group: dataCmds, cmdFn: objref, helpMsg: `Print object reference.`},
+
 		{aliases: []string{"vars"}, cmdFn: vars, group: dataCmds, helpMsg: `Print package variables.
 
 	vars [-v] [<regex>]
@@ -437,8 +439,9 @@ For example:
 			simple	- disables automatic switch between cgo and go
 			fromg	- starts from the registers stored in the runtime.g struct
 `},
-		{aliases: []string{"frame"},
-			group: stackCmds,
+		{
+			aliases: []string{"frame"},
+			group:   stackCmds,
 			cmdFn: func(t *Term, ctx callContext, arg string) error {
 				return c.frameCommand(t, ctx, arg, frameSet)
 			},
@@ -448,9 +451,11 @@ For example:
 	frame <m> <command>
 
 The first form sets frame used by subsequent commands such as "print" or "set".
-The second form runs the command on the given frame.`},
-		{aliases: []string{"up"},
-			group: stackCmds,
+The second form runs the command on the given frame.`,
+		},
+		{
+			aliases: []string{"up"},
+			group:   stackCmds,
 			cmdFn: func(t *Term, ctx callContext, arg string) error {
 				return c.frameCommand(t, ctx, arg, frameUp)
 			},
@@ -459,9 +464,11 @@ The second form runs the command on the given frame.`},
 	up [<m>]
 	up [<m>] <command>
 
-Move the current frame up by <m>. The second form runs the command on the given frame.`},
-		{aliases: []string{"down"},
-			group: stackCmds,
+Move the current frame up by <m>. The second form runs the command on the given frame.`,
+		},
+		{
+			aliases: []string{"down"},
+			group:   stackCmds,
 			cmdFn: func(t *Term, ctx callContext, arg string) error {
 				return c.frameCommand(t, ctx, arg, frameDown)
 			},
@@ -470,7 +477,8 @@ Move the current frame up by <m>. The second form runs the command on the given 
 	down [<m>]
 	down [<m>] <command>
 
-Move the current frame down by <m>. The second form runs the command on the given frame.`},
+Move the current frame down by <m>. The second form runs the command on the given frame.`,
+		},
 		{aliases: []string{"deferred"}, group: stackCmds, cmdFn: c.deferredCommand, helpMsg: `Executes command in the context of a deferred call.
 
 	deferred <n> <command>
@@ -2381,6 +2389,14 @@ func locals(t *Term, ctx callContext, args string) error {
 	return t.printFilteredVariables("locals", locals, filter, cfg)
 }
 
+func objref(t *Term, ctx callContext, args string) error {
+	vars, err := t.client.ObjectReference()
+	if err != nil {
+		return err
+	}
+	return t.printFilteredVariables("objref", vars, "", api.LoadConfig{})
+}
+
 func vars(t *Term, ctx callContext, args string) error {
 	filter, cfg := parseVarArguments(args, t)
 	vars, err := t.client.ListPackageVariables(filter, cfg)
@@ -3388,7 +3404,7 @@ func transcript(t *Term, ctx callContext, args string) error {
 	if truncate {
 		flags |= os.O_TRUNC
 	}
-	fh, err := os.OpenFile(path, flags, 0660)
+	fh, err := os.OpenFile(path, flags, 0o660)
 	if err != nil {
 		return err
 	}

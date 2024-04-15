@@ -25,8 +25,7 @@ func NewServer(config *service.Config, debugger *debugger.Debugger) *RPCServer {
 	return &RPCServer{config, debugger}
 }
 
-type ProcessPidIn struct {
-}
+type ProcessPidIn struct{}
 
 type ProcessPidOut struct {
 	Pid int
@@ -38,8 +37,7 @@ func (s *RPCServer) ProcessPid(arg ProcessPidIn, out *ProcessPidOut) error {
 	return nil
 }
 
-type LastModifiedIn struct {
-}
+type LastModifiedIn struct{}
 
 type LastModifiedOut struct {
 	Time time.Time
@@ -54,8 +52,7 @@ type DetachIn struct {
 	Kill bool
 }
 
-type DetachOut struct {
-}
+type DetachOut struct{}
 
 // Detach detaches the debugger, optionally killing the process.
 func (s *RPCServer) Detach(arg DetachIn, out *DetachOut) error {
@@ -137,8 +134,7 @@ func (s *RPCServer) Command(command api.DebuggerCommand, cb service.RPCCallback)
 	cb.Return(out, nil)
 }
 
-type GetBufferedTracepointsIn struct {
-}
+type GetBufferedTracepointsIn struct{}
 
 type GetBufferedTracepointsOut struct {
 	TracepointResults []api.TracepointResult
@@ -352,8 +348,7 @@ type AmendBreakpointIn struct {
 	Breakpoint api.Breakpoint
 }
 
-type AmendBreakpointOut struct {
-}
+type AmendBreakpointOut struct{}
 
 // AmendBreakpoint allows user to update an existing breakpoint
 // for example to change the information retrieved when the
@@ -367,18 +362,15 @@ func (s *RPCServer) AmendBreakpoint(arg AmendBreakpointIn, out *AmendBreakpointO
 	return s.debugger.AmendBreakpoint(&arg.Breakpoint)
 }
 
-type CancelNextIn struct {
-}
+type CancelNextIn struct{}
 
-type CancelNextOut struct {
-}
+type CancelNextOut struct{}
 
 func (s *RPCServer) CancelNext(arg CancelNextIn, out *CancelNextOut) error {
 	return s.debugger.CancelNext()
 }
 
-type ListThreadsIn struct {
-}
+type ListThreadsIn struct{}
 
 type ListThreadsOut struct {
 	Threads []*api.Thread
@@ -497,6 +489,21 @@ func (s *RPCServer) ListLocalVars(arg ListLocalVarsIn, out *ListLocalVarsOut) er
 	return nil
 }
 
+type ObjectReferenceIn struct{}
+
+type ObjectReferenceOut struct {
+	Variables []api.Variable
+}
+
+func (s *RPCServer) ObjectReference(arg ObjectReferenceIn, out *ObjectReferenceOut) error {
+	vars, err := s.debugger.ObjectReference()
+	if err != nil {
+		return err
+	}
+	out.Variables = api.ConvertVars(vars)
+	return nil
+}
+
 type ListFunctionArgsIn struct {
 	Scope api.EvalScope
 	Cfg   api.LoadConfig
@@ -550,8 +557,7 @@ type SetIn struct {
 	Value  string
 }
 
-type SetOut struct {
-}
+type SetOut struct{}
 
 // Set sets the value of a variable. Only numerical types and
 // pointers are currently supported.
@@ -664,7 +670,7 @@ type ListGoroutinesOut struct {
 // For each group a maximum of MaxGroupMembers example goroutines are
 // returned, as well as the total number of goroutines in the group.
 func (s *RPCServer) ListGoroutines(arg ListGoroutinesIn, out *ListGoroutinesOut) error {
-	//TODO(aarzilli): if arg contains a running goroutines filter (not negated)
+	// TODO(aarzilli): if arg contains a running goroutines filter (not negated)
 	// and start == 0 and count == 0 then we can optimize this by just looking
 	// at threads directly.
 
@@ -710,8 +716,7 @@ func (s *RPCServer) ListGoroutines(arg ListGoroutinesIn, out *ListGoroutinesOut)
 	return nil
 }
 
-type AttachedToExistingProcessIn struct {
-}
+type AttachedToExistingProcessIn struct{}
 
 type AttachedToExistingProcessOut struct {
 	Answer bool
@@ -792,8 +797,7 @@ func (s *RPCServer) Disassemble(arg DisassembleIn, out *DisassembleOut) error {
 	return nil
 }
 
-type RecordedIn struct {
-}
+type RecordedIn struct{}
 
 type RecordedOut struct {
 	Recorded       bool
@@ -819,8 +823,7 @@ func (s *RPCServer) Checkpoint(arg CheckpointIn, out *CheckpointOut) error {
 	return err
 }
 
-type ListCheckpointsIn struct {
-}
+type ListCheckpointsIn struct{}
 
 type ListCheckpointsOut struct {
 	Checkpoints []api.Checkpoint
@@ -843,15 +846,13 @@ type ClearCheckpointIn struct {
 	ID int
 }
 
-type ClearCheckpointOut struct {
-}
+type ClearCheckpointOut struct{}
 
 func (s *RPCServer) ClearCheckpoint(arg ClearCheckpointIn, out *ClearCheckpointOut) error {
 	return s.debugger.ClearCheckpoint(arg.ID)
 }
 
-type IsMulticlientIn struct {
-}
+type IsMulticlientIn struct{}
 
 type IsMulticlientOut struct {
 	// IsMulticlient returns true if the headless instance was started with --accept-multiclient
@@ -896,8 +897,7 @@ func (s *RPCServer) FunctionReturnLocations(in FunctionReturnLocationsIn, out *F
 }
 
 // ListDynamicLibrariesIn holds the arguments of ListDynamicLibraries
-type ListDynamicLibrariesIn struct {
-}
+type ListDynamicLibrariesIn struct{}
 
 // ListDynamicLibrariesOut holds the return values of ListDynamicLibraries
 type ListDynamicLibrariesOut struct {
@@ -986,16 +986,14 @@ func (s *RPCServer) ExamineMemory(arg ExamineMemoryIn, out *ExaminedMemoryOut) e
 	}
 
 	out.Mem = Mem
-	out.IsLittleEndian = true //TODO: get byte order from debugger.target.BinInfo().Arch
+	out.IsLittleEndian = true // TODO: get byte order from debugger.target.BinInfo().Arch
 
 	return nil
 }
 
-type StopRecordingIn struct {
-}
+type StopRecordingIn struct{}
 
-type StopRecordingOut struct {
-}
+type StopRecordingOut struct{}
 
 func (s *RPCServer) StopRecording(arg StopRecordingIn, cb service.RPCCallback) {
 	close(cb.SetupDoneChan())
@@ -1042,11 +1040,9 @@ func (s *RPCServer) DumpWait(arg DumpWaitIn, out *DumpWaitOut) error {
 	return nil
 }
 
-type DumpCancelIn struct {
-}
+type DumpCancelIn struct{}
 
-type DumpCancelOut struct {
-}
+type DumpCancelOut struct{}
 
 // DumpCancel cancels the core dump.
 func (s *RPCServer) DumpCancel(arg DumpCancelIn, out *DumpCancelOut) error {
@@ -1069,8 +1065,7 @@ func (s *RPCServer) CreateWatchpoint(arg CreateWatchpointIn, out *CreateWatchpoi
 	return err
 }
 
-type BuildIDIn struct {
-}
+type BuildIDIn struct{}
 
 type BuildIDOut struct {
 	BuildID string
@@ -1081,8 +1076,7 @@ func (s *RPCServer) BuildID(arg BuildIDIn, out *BuildIDOut) error {
 	return nil
 }
 
-type ListTargetsIn struct {
-}
+type ListTargetsIn struct{}
 
 type ListTargetsOut struct {
 	Targets []api.Target
@@ -1106,16 +1100,14 @@ type FollowExecIn struct {
 	Regex  string
 }
 
-type FollowExecOut struct {
-}
+type FollowExecOut struct{}
 
 // FollowExec enables or disables follow exec mode.
 func (s *RPCServer) FollowExec(arg FollowExecIn, out *FollowExecOut) error {
 	return s.debugger.FollowExec(arg.Enable, arg.Regex)
 }
 
-type FollowExecEnabledIn struct {
-}
+type FollowExecEnabledIn struct{}
 
 type FollowExecEnabledOut struct {
 	Enabled bool

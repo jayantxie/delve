@@ -220,6 +220,15 @@ func (s *RPCServer) ListLocalVars(scope api.EvalScope, variables *[]api.Variable
 	return nil
 }
 
+func (s *RPCServer) ObjectReference(arg interface{}, variables *[]api.Variable) error {
+	vars, err := s.debugger.ObjectReference()
+	if err != nil {
+		return err
+	}
+	*variables = api.ConvertVars(vars)
+	return nil
+}
+
 func (s *RPCServer) ListFunctionArgs(scope api.EvalScope, variables *[]api.Variable) error {
 	vars, err := s.debugger.FunctionArguments(scope.GoroutineID, scope.Frame, scope.DeferredCall, defaultLoadConfig)
 	if err != nil {

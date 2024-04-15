@@ -377,6 +377,12 @@ func (c *RPCClient) ListLocalVariables(scope api.EvalScope, cfg api.LoadConfig) 
 	return out.Variables, err
 }
 
+func (c *RPCClient) ObjectReference() ([]api.Variable, error) {
+	var out ObjectReferenceOut
+	err := c.call("ObjectReference", ObjectReferenceIn{}, &out)
+	return out.Variables, err
+}
+
 func (c *RPCClient) ListThreadRegisters(threadID int, includeFp bool) (api.Registers, error) {
 	out := new(ListRegistersOut)
 	err := c.call("ListRegisters", ListRegistersIn{ThreadID: threadID, IncludeFp: includeFp, Scope: nil}, out)

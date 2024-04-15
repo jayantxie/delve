@@ -494,7 +494,6 @@ func (d *Debugger) Restart(rerecord bool, pos string, resetArgs bool, newArgs []
 
 	if !resetArgs && (d.config.Stdout.File != nil || d.config.Stderr.File != nil) {
 		return nil, ErrCanNotRestart
-
 	}
 
 	if err := d.detach(true); err != nil {
@@ -1581,6 +1580,41 @@ func (d *Debugger) LocalVariables(goid int64, frame, deferredCall int, cfg proc.
 	return s.LocalVariables(cfg)
 }
 
+var defaultLoadConfig = proc.LoadConfig{
+	FollowPointers:     true,
+	MaxVariableRecurse: 1,
+	MaxStringLen:       64,
+	MaxArrayValues:     64,
+	MaxStructFields:    -1,
+}
+
+func (d *Debugger) ObjectReference() (res []*proc.Variable, err error) {
+	d.targetMutex.Lock()
+	defer d.targetMutex.Unlock()
+	grs, _, err := proc.GoroutinesInfo(d.target.Selected, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	for _, gr := range grs {
+		sf, err := proc.GoroutineStacktrace(d.target.Selected, gr, 0, 0)
+		if err != nil {
+			return nil, err
+		}
+		for i := range sf {
+			if sf[i].Current.Fn != nil {
+				var err error
+				scope := proc.FrameToScope(d.target.Selected, d.target.Selected.Memory(), nil, 0, sf[i:]...)
+				locals, err := scope.LocalVariables(defaultLoadConfig)
+				if err != nil {
+					return nil, err
+				}
+				res = append(res, locals...)
+			}
+		}
+	}
+	return res, nil
+}
+
 // FunctionArguments returns the arguments to the current function.
 func (d *Debugger) FunctionArguments(goid int64, frame, deferredCall int, cfg proc.LoadConfig) ([]*proc.Variable, error) {
 	d.targetMutex.Lock()
@@ -1900,7 +1934,7 @@ func (d *Debugger) convertDefers(defers []*proc.Defer) []api.Defer {
 		if defers[i].Unreadable != nil {
 			r[i].Unreadable = defers[i].Unreadable.Error()
 		} else {
-			var entry = defers[i].DeferPC
+			entry := defers[i].DeferPC
 			if ddfn != nil {
 				entry = ddfn.Entry
 			}
@@ -2194,7 +2228,7 @@ func (d *Debugger) DumpStart(dest string) error {
 	d.targetMutex.Lock()
 	// targetMutex will only be unlocked when the dump is done
 
-	//TODO(aarzilli): what do we do if the user switches to a different target after starting a dump but before it's finished?
+	// TODO(aarzilli): what do we do if the user switches to a different target after starting a dump but before it's finished?
 
 	if !d.target.CanDump {
 		d.targetMutex.Unlock()

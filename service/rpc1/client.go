@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/rpc"
 	"net/rpc/jsonrpc"
-
 	"sync"
 
 	"github.com/go-delve/delve/service/api"
@@ -262,6 +261,12 @@ func (c *RPCClient) ListPackageVariablesFor(threadID int, filter string) ([]api.
 func (c *RPCClient) ListLocalVariables(scope api.EvalScope) ([]api.Variable, error) {
 	var vars []api.Variable
 	err := c.call("ListLocalVars", scope, &vars)
+	return vars, err
+}
+
+func (c *RPCClient) ObjectReference() ([]api.Variable, error) {
+	var vars []api.Variable
+	err := c.call("ObjectReference", nil, &vars)
 	return vars, err
 }
 
