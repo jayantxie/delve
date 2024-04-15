@@ -1580,13 +1580,7 @@ func (d *Debugger) LocalVariables(goid int64, frame, deferredCall int, cfg proc.
 	return s.LocalVariables(cfg)
 }
 
-var defaultLoadConfig = proc.LoadConfig{
-	FollowPointers:     true,
-	MaxVariableRecurse: 1,
-	MaxStringLen:       64,
-	MaxArrayValues:     64,
-	MaxStructFields:    -1,
-}
+var ShortLoadConfig = proc.LoadConfig{MaxStringLen: 64, MaxStructFields: 3}
 
 func (d *Debugger) ObjectReference() (res []*proc.Variable, err error) {
 	d.targetMutex.Lock()
@@ -1604,7 +1598,7 @@ func (d *Debugger) ObjectReference() (res []*proc.Variable, err error) {
 			if sf[i].Current.Fn != nil {
 				var err error
 				scope := proc.FrameToScope(d.target.Selected, d.target.Selected.Memory(), nil, 0, sf[i:]...)
-				locals, err := scope.LocalVariables(defaultLoadConfig)
+				locals, err := scope.LocalVariables(ShortLoadConfig)
 				if err != nil {
 					return nil, err
 				}
