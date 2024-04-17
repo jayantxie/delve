@@ -1582,30 +1582,63 @@ func (d *Debugger) LocalVariables(goid int64, frame, deferredCall int, cfg proc.
 
 var ShortLoadConfig = proc.LoadConfig{MaxStringLen: 64, MaxStructFields: 3}
 
+func filterRuntimeVars(v *proc.Variable) bool {
+	if strings.HasPrefix(v.Name, "runtime.") ||
+		strings.HasPrefix(v.Name, "internal/") ||
+		strings.HasPrefix(v.Name, "_cgo_") {
+		return true
+	}
+	return false
+}
+
 func (d *Debugger) ObjectReference() (res []*proc.Variable, err error) {
 	d.targetMutex.Lock()
 	defer d.targetMutex.Unlock()
-	grs, _, err := proc.GoroutinesInfo(d.target.Selected, 0, 0)
-	if err != nil {
-		return nil, err
-	}
-	for _, gr := range grs {
-		sf, err := proc.GoroutineStacktrace(d.target.Selected, gr, 0, 0)
-		if err != nil {
-			return nil, err
-		}
-		for i := range sf {
-			if sf[i].Current.Fn != nil {
-				var err error
-				scope := proc.FrameToScope(d.target.Selected, d.target.Selected.Memory(), nil, 0, sf[i:]...)
-				locals, err := scope.LocalVariables(ShortLoadConfig)
-				if err != nil {
-					return nil, err
-				}
-				res = append(res, locals...)
-			}
-		}
-	}
+	//grs, _, err := proc.GoroutinesInfo(d.target.Selected, 0, 0)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//for _, gr := range grs {
+	//	sf, err := proc.GoroutineStacktrace(d.target.Selected, gr, 512, 0)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	for i := range sf {
+	//		if sf[i].Current.Fn != nil {
+	//			var err error
+	//			scope := proc.FrameToScope(d.target.Selected, d.target.Selected.Memory(), nil, 0, sf[i:]...)
+	//			locals, err := scope.LocalVariables(ShortLoadConfig)
+	//			if err != nil {
+	//				return nil, err
+	//			}
+	//			for _, l := range locals {
+	//				// filter runtime package
+	//				if !filterRuntimeVars(l) {
+	//					res = append(res, l)
+	//				}
+	//			}
+	//		}
+	//	}
+	//}
+	//p := d.target.Selected
+	//scope, err := proc.ThreadScope(p, p.CurrentThread())
+	//if err != nil {
+	//	return nil, err
+	//}
+	//
+	//pv, err := scope.PackageVariables(ShortLoadConfig)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//for i := range pv {
+	//	if !filterRuntimeVars(pv[i]) {
+	//		res = append(res, pv[i])
+	//	}
+	//}
+	d.target.Selected.ForEachObject(func(x core.Address) bool {
+		res = append(res, &proc.Variable{Addr: uint64(x)})
+		return true
+	})
 	return res, nil
 }
 

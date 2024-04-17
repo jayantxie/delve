@@ -683,6 +683,12 @@ func (scope *EvalScope) findGlobal(pkgName, varName string) (*Variable, error) {
 	return nil, fmt.Errorf("could not find symbol value for %s.%s", pkgName, varName)
 }
 
+func (scope *EvalScope) rtConstant(name string) int64 {
+	x, _ := scope.findGlobalInternal("runtime." + name)
+	v, _ := constant.Int64Val(x.Value)
+	return v
+}
+
 func (scope *EvalScope) findGlobalInternal(name string) (*Variable, error) {
 	for _, pkgvar := range scope.BinInfo.packageVars {
 		if pkgvar.name == name || strings.HasSuffix(pkgvar.name, "/"+name) {
@@ -697,7 +703,7 @@ func (scope *EvalScope) findGlobalInternal(name string) (*Variable, error) {
 	}
 	for _, fn := range scope.BinInfo.Functions {
 		if fn.Name == name || strings.HasSuffix(fn.Name, "/"+name) {
-			//TODO(aarzilli): convert function entry into a function type?
+			// TODO(aarzilli): convert function entry into a function type?
 			r := newVariable(fn.Name, fn.Entry, &godwarf.FuncType{}, scope.BinInfo, scope.Mem)
 			r.Value = constant.MakeString(fn.Name)
 			r.Base = fn.Entry
@@ -2512,8 +2518,8 @@ func (v *Variable) mapAccess(idx *Variable) (*Variable, error) {
 	lcfg := loadFullValue
 	if idx.Kind == reflect.String && int64(len(constant.StringVal(idx.Value))) == idx.Len && idx.Len > int64(lcfg.MaxStringLen) {
 		// If the index is a string load as much of the keys to at least match the length of the index.
-		//TODO(aarzilli): when struct literals are implemented this needs to be
-		//done recursively for literal struct fields.
+		// TODO(aarzilli): when struct literals are implemented this needs to be
+		// done recursively for literal struct fields.
 		lcfg.MaxStringLen = int(idx.Len)
 	}
 
@@ -2655,7 +2661,7 @@ func (v *Variable) findMethod(mname string) (*Variable, error) {
 		pkg := typePath[:dot]
 		receiver := typePath[dot+1:]
 
-		//TODO(aarzilli): support generic functions?
+		// TODO(aarzilli): support generic functions?
 
 		if fns := v.bi.LookupFunc()[fmt.Sprintf("%s.%s.%s", pkg, receiver, mname)]; len(fns) == 1 {
 			r, err := functionToVariable(fns[0], v.bi, v.mem)
@@ -2724,10 +2730,12 @@ func fakeArrayType(n uint64, fieldType godwarf.Type) godwarf.Type {
 		CommonType: godwarf.CommonType{
 			ReflectKind: reflect.Array,
 			ByteSize:    int64(n) * stride,
-			Name:        fmt.Sprintf("[%d]%s", n, fieldType.String())},
+			Name:        fmt.Sprintf("[%d]%s", n, fieldType.String()),
+		},
 		Type:          fieldType,
 		StrideBitSize: stride * 8,
-		Count:         int64(n)}
+		Count:         int64(n),
+	}
 }
 
 var errMethodEvalUnsupported = errors.New("evaluating methods not supported on this version of Go")
@@ -2799,7 +2807,7 @@ func (fn *Function) fakeType(bi *BinaryInfo, removeReceiver bool) (*godwarf.Func
 			Name:        "func(" + argstr + ")" + retstr,
 			ReflectKind: reflect.Func,
 		},
-		//TODO(aarzilli): at the moment we aren't using the ParamType and
+		// TODO(aarzilli): at the moment we aren't using the ParamType and
 		// ReturnType fields of FuncType anywhere (when this is returned to the
 		// client it's first converted to a string and the function calling code
 		// reads the subroutine entry because it needs to know the stack offsets).

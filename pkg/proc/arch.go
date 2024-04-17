@@ -90,6 +90,14 @@ func (a *Arch) PtrSize() int {
 	return a.ptrSize
 }
 
+func (a *Arch) LogPtrSize() int {
+	if a.ptrSize == 8 {
+		return 3
+	} else {
+		return 2
+	}
+}
+
 // MaxInstructionLength is the maximum size in bytes of an instruction.
 func (a *Arch) MaxInstructionLength() int {
 	return a.maxInstructionLength

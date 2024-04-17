@@ -21,6 +21,7 @@ import (
 	"github.com/go-delve/delve/pkg/dwarf/op"
 	"github.com/go-delve/delve/pkg/goversion"
 	"github.com/go-delve/delve/pkg/logflags"
+	"github.com/go-delve/delve/pkg/proc/core"
 )
 
 const (
@@ -183,9 +184,11 @@ type LoadConfig struct {
 	MaxMapBuckets int
 }
 
-var loadSingleValue = LoadConfig{false, 0, 64, 0, 0, 0}
-var loadFullValue = LoadConfig{true, 1, 64, 64, -1, 0}
-var loadFullValueLongerStrings = LoadConfig{true, 1, 1024 * 1024, 64, -1, 0}
+var (
+	loadSingleValue            = LoadConfig{false, 0, 64, 0, 0, 0}
+	loadFullValue              = LoadConfig{true, 1, 64, 64, -1, 0}
+	loadFullValueLongerStrings = LoadConfig{true, 1, 1024 * 1024, 64, -1, 0}
+)
 
 // G status, from: src/runtime/runtime2.go
 const (
@@ -1134,12 +1137,11 @@ func (v *Variable) structMember(memberName string) (*Variable, error) {
 				if field.Name == memberName {
 					return structVar.toField(field)
 				}
-				isEmbeddedStructMember :=
-					field.Embedded ||
-						(field.Type.Common().Name == field.Name) ||
-						(len(field.Name) > 1 &&
-							field.Name[0] == '*' &&
-							field.Type.Common().Name[1:] == field.Name[1:])
+				isEmbeddedStructMember := field.Embedded ||
+					(field.Type.Common().Name == field.Name) ||
+					(len(field.Name) > 1 &&
+						field.Name[0] == '*' &&
+						field.Type.Common().Name[1:] == field.Name[1:])
 				if !isEmbeddedStructMember {
 					continue
 				}
@@ -1446,6 +1448,42 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 	default:
 		v.Unreadable = fmt.Errorf("unknown or unsupported kind: %q", v.Kind.String())
 	}
+}
+
+func (v *Variable) lives() map[core.Address]bool {
+	if !v.loaded {
+		panic("fieldVariable called on a variable that wasn't loaded")
+	}
+	live := make(map[core.Address]bool)
+	switch v.Kind {
+	case reflect.Ptr, reflect.UnsafePointer:
+		live[core.Address(v.Children[0].Addr)] = true
+	case reflect.Chan:
+		live[core.Address(v.Base)] = true
+	case reflect.Map:
+		live[core.Address(v.Base)] = true
+	case reflect.String:
+		live[core.Address(v.Base)] = true
+	case reflect.Slice, reflect.Array:
+		live[core.Address(v.Base)] = true
+	case reflect.Struct:
+		for _, child := range v.Children {
+			for addr := range child.lives() {
+				live[addr] = true
+			}
+		}
+	case reflect.Interface:
+		live[core.Address(v.Children[0].Addr)] = true
+	case reflect.Complex64, reflect.Complex128:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+	case reflect.Bool:
+	case reflect.Float32, reflect.Float64:
+	case reflect.Func:
+		live[core.Address(v.Base)] = true
+	default:
+	}
+	return live
 }
 
 // convertToEface converts srcv into an "interface {}" and writes it to
@@ -2093,9 +2131,11 @@ func (v *Variable) mapIterator() *mapIterator {
 	return it
 }
 
-var errMapBucketContentsNotArray = errors.New("malformed map type: keys, values or tophash of a bucket is not an array")
-var errMapBucketContentsInconsistentLen = errors.New("malformed map type: inconsistent array length in bucket")
-var errMapBucketsNotStruct = errors.New("malformed map type: buckets, oldbuckets or overflow field not a struct")
+var (
+	errMapBucketContentsNotArray        = errors.New("malformed map type: keys, values or tophash of a bucket is not an array")
+	errMapBucketContentsInconsistentLen = errors.New("malformed map type: inconsistent array length in bucket")
+	errMapBucketsNotStruct              = errors.New("malformed map type: buckets, oldbuckets or overflow field not a struct")
+)
 
 func (it *mapIterator) nextBucket() bool {
 	if it.overflow != nil && it.overflow.Addr > 0 {
@@ -2259,7 +2299,7 @@ func (it *mapIterator) mapEvacuated(b *Variable) bool {
 		if err != nil {
 			return true
 		}
-		//TODO: this needs to be > hashTophashEmptyOne for go >= 1.12
+		// TODO: this needs to be > hashTophashEmptyOne for go >= 1.12
 		return tophash0 > it.hashTophashEmptyOne && tophash0 < it.hashMinTopHash
 	}
 	return true

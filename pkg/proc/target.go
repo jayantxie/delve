@@ -4,13 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"go/constant"
+	"math/bits"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/go-delve/delve/pkg/dwarf/op"
 	"github.com/go-delve/delve/pkg/goversion"
 	"github.com/go-delve/delve/pkg/logflags"
+	"github.com/go-delve/delve/pkg/proc/core"
 	"github.com/go-delve/delve/pkg/proc/internal/ebpf"
 )
 
@@ -67,6 +70,17 @@ type Target struct {
 	// This must be cleared whenever the target is resumed.
 	gcache goroutineCache
 	iscgo  *bool
+
+	pages []core.Address // deterministic ordering of keys of pageTable
+
+	// data structure for fast object finding
+	// The key to these maps is the object address divided by
+	// pageTableSize * heapInfoSize.
+	pageTable map[core.Address]*pageTableEntry
+
+	specials []*Variable
+
+	nObj int
 
 	// exitStatus is the exit status of the process we are debugging.
 	// Saved here to relay to any future commands.
@@ -201,6 +215,10 @@ func (grp *TargetGroup) newTarget(p ProcessInternal, pid int, currentThread Thre
 	t.createPluginOpenBreakpoint()
 
 	t.gcache.init(p.BinInfo())
+
+	t.readHeap()
+	t.markObjects()
+
 	t.fakeMemoryRegistryMap = make(map[string]*compositeMemory)
 
 	if grp.cfg.DisableAsyncPreempt {
@@ -208,6 +226,403 @@ func (grp *TargetGroup) newTarget(p ProcessInternal, pid int, currentThread Thre
 	}
 
 	return t, nil
+}
+
+// markObjects finds all the live objects in the heap and marks them
+// in the p.heapInfo mark fields.
+func (t *Target) markObjects() {
+	ptrSize := t.BinInfo().Arch.PtrSize()
+
+	// number of live objects found so far
+	n := 0
+	// total size of live objects
+	var live int64
+
+	var q []core.Address
+
+	// Function to call when we find a new pointer.
+	add := func(x core.Address) {
+		h := t.findHeapInfo(x)
+		if h == nil { // not in heap or not in a valid span
+			// Invalid spans can happen with intra-stack pointers.
+			return
+		}
+		// Round down to object start.
+		x = h.base.Add(x.Sub(h.base) / h.size * h.size)
+		// Object start may map to a different info. Reload heap info.
+		h = t.findHeapInfo(x)
+		// Find mark bit
+		b := uint64(x) % heapInfoSize / 8
+		if h.mark&(uint64(1)<<b) != 0 { // already found
+			return
+		}
+		h.mark |= uint64(1) << b
+		n++
+		live += h.size
+		q = append(q, x)
+	}
+
+	// Start with scanning all the roots.
+	// Note that we don't just use the DWARF roots, just in case DWARF isn't complete.
+	// Instead we use exactly what the runtime uses.
+	grs, _, _ := GoroutinesInfo(t, 0, 0)
+	for _, gr := range grs {
+		sf, _ := GoroutineStacktrace(t, gr, 512, 0)
+		for i := range sf {
+			if sf[i].Current.Fn != nil {
+				scope := FrameToScope(t, t.Memory(), nil, 0, sf[i:]...)
+				locals, _ := scope.LocalVariables(loadFullValueLongerStrings)
+				for _, l := range locals {
+					for addr := range l.lives() {
+						add(addr)
+					}
+				}
+			}
+		}
+	}
+
+	scope, _ := ThreadScope(t, t.CurrentThread())
+	pv, _ := scope.PackageVariables(loadFullValueLongerStrings)
+	for i := range pv {
+		for addr := range pv[i].lives() {
+			add(addr)
+		}
+	}
+
+	// Finalizers
+	for _, r := range t.specials {
+		for _, child := range r.Children {
+			for addr := range child.lives() {
+				add(addr)
+			}
+		}
+	}
+
+	// Expand root set to all reachable objects.
+	for len(q) > 0 {
+		x := q[len(q)-1]
+		q = q[:len(q)-1]
+
+		// Scan object for pointers.
+		size := t.Size(x)
+		for i := int64(0); i < size; i += int64(ptrSize) {
+			a := x.Add(i)
+			if t.isPtrFromHeap(a) {
+				sa, _ := readUintRaw(t.Memory(), uint64(a), 8)
+				add(core.Address(sa))
+			}
+		}
+	}
+
+	t.nObj = n
+
+	// Initialize firstIdx fields in the heapInfo, for fast object index lookups.
+	n = 0
+	t.ForEachObject(func(x core.Address) bool {
+		h := t.findHeapInfo(x)
+		if h.firstIdx == -1 {
+			h.firstIdx = n
+		}
+		n++
+		return true
+	})
+	if n != t.nObj {
+		panic("object count wrong")
+	}
+}
+
+// ForEachObject calls fn with each object in the Go heap.
+// If fn returns false, ForEachObject returns immediately.
+func (p *Target) ForEachObject(fn func(x core.Address) bool) {
+	for _, k := range p.pages {
+		pt := p.pageTable[k]
+		for i := range pt {
+			h := &pt[i]
+			m := h.mark
+			for m != 0 {
+				j := bits.TrailingZeros64(m)
+				m &= m - 1
+				x := k*pageTableSize*heapInfoSize + core.Address(i)*heapInfoSize + core.Address(j)*8
+				if !fn(x) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// Size returns the size of x in bytes.
+func (t *Target) Size(x core.Address) int64 {
+	return t.findHeapInfo(x).size
+}
+
+// isPtrFromHeap reports whether the inferior at address a contains a pointer.
+// a must be somewhere in the heap.
+func (t *Target) isPtrFromHeap(a core.Address) bool {
+	return t.findHeapInfo(a).IsPtr(a, int64(t.BinInfo().Arch.PtrSize()))
+}
+
+// arena is a summary of the size of components of a heapArena.
+type arena struct {
+	heapMin core.Address
+	heapMax core.Address
+
+	// Optional.
+	bitmapMin core.Address
+	bitmapMax core.Address
+
+	spanTableMin core.Address
+	spanTableMax core.Address
+}
+
+func (t *Target) readHeap() {
+	ptrSize := t.BinInfo().Arch.PtrSize()
+	exeimage := t.BinInfo().Images[0]
+	rdr := exeimage.DwarfReader()
+	if rdr == nil {
+		return
+	}
+
+	t.pageTable = map[core.Address]*pageTableEntry{}
+
+	scope, _ := ThreadScope(t, t.CurrentThread())
+
+	mheap, _ := scope.findGlobalInternal("runtime.mheap_")
+	mheap.loadValue(loadFullValueLongerStrings)
+
+	var arenas []arena
+
+	if mheap.fieldVariable("spans") != nil {
+		// go 1.9 or 1.10. There is a single arena.
+		arenas = append(arenas, t.readArena19(mheap))
+	} else {
+		// go 1.11+. Has multiple arenas.
+		arenaSize := scope.rtConstant("heapArenaBytes")
+		if arenaSize%heapInfoSize != 0 {
+			panic("arenaSize not a multiple of heapInfoSize")
+		}
+		arenaBaseOffset := t.getArenaBaseOffset(scope)
+		if ptrSize == 4 && arenaBaseOffset != 0 {
+			panic("arenaBaseOffset must be 0 for 32-bit inferior")
+		}
+
+		level1Table := mheap.fieldVariable("arenas")
+		level1size := level1Table.Len
+		for level1 := int64(0); level1 < level1size; level1++ {
+			ptr, _ := level1Table.sliceAccess(int(level1))
+			if ptr.Addr == 0 {
+				continue
+			}
+			level2table := ptr.maybeDereference()
+			level2size := level2table.Len
+			for level2 := int64(0); level2 < level2size; level2++ {
+				ptr, _ = level2table.sliceAccess(int(level2))
+				if ptr.Addr == 0 {
+					continue
+				}
+				a := ptr.maybeDereference()
+
+				min := core.Address(arenaSize*(level2+level1*level2size) - arenaBaseOffset)
+				max := min.Add(arenaSize)
+
+				arenas = append(arenas, t.readArena(a, min, max))
+			}
+		}
+	}
+
+	t.readSpans(scope, mheap, arenas)
+}
+
+func (t *Target) getArenaBaseOffset(scope *EvalScope) int64 {
+	if x, err := scope.findGlobalInternal("runtime.arenaBaseOffsetUintptr"); err == nil { // go1.15+
+		// arenaBaseOffset changed sign in 1.15. Callers treat this
+		// value as it was specified in 1.14, so we negate it here.
+		xv, _ := constant.Int64Val(x.Value)
+		return -xv
+	}
+	x, _ := scope.findGlobalInternal("runtime.arenaBaseOffset")
+	xv, _ := constant.Int64Val(x.Value)
+	return xv
+}
+
+// Read the global arena. Go 1.9 or 1.10 only, which has a single arena. Record
+// heap pointers and return the arena size summary.
+func (t *Target) readArena19(mheap *Variable) arena {
+	ptrSize := int64(t.BinInfo().Arch.PtrSize())
+	logPtrSize := t.BinInfo().Arch.LogPtrSize()
+
+	asUint := func(name string) uint64 {
+		x, _ := mheap.fieldVariable(name).asUint()
+		return x
+	}
+
+	arenaStart := core.Address(asUint("arena_start"))
+	arenaUsed := core.Address(asUint("arena_used"))
+	arenaEnd := core.Address(asUint("arena_end"))
+	bitmapEnd := core.Address(asUint("bitmap"))
+	bitmapStart := bitmapEnd.Add(-int64(asUint("bitmap_mapped")))
+	spanTableStart := core.Address(mheap.fieldVariable("spans").Base)
+	spanTableEnd := spanTableStart.Add(mheap.fieldVariable("spans").Cap * ptrSize)
+
+	// Copy pointer bits to heap info.
+	// Note that the pointer bits are stored backwards.
+	for a := arenaStart; a < arenaUsed; a = a.Add(ptrSize) {
+		off := a.Sub(arenaStart) >> logPtrSize
+
+		bme, _ := readUintRaw(t.Memory(), uint64(bitmapEnd.Add(-(off>>2)-1)), 1)
+		if uint8(bme)>>uint(off&3)&1 != 0 {
+			t.setHeapPtr(a)
+		}
+	}
+
+	return arena{
+		heapMin:      arenaStart,
+		heapMax:      arenaEnd,
+		bitmapMin:    bitmapStart,
+		bitmapMax:    bitmapEnd,
+		spanTableMin: spanTableStart,
+		spanTableMax: spanTableEnd,
+	}
+}
+
+// Read a single heapArena. Go 1.11+, which has multiple areans. Record heap
+// pointers and return the arena size summary.
+func (t *Target) readArena(a *Variable, min, max core.Address) arena {
+	ptrSize := t.BinInfo().Arch.PtrSize()
+
+	var bitmap *Variable
+	if bitmap = a.fieldVariable("bitmap"); bitmap != nil { // Before go 1.22
+		if a.fieldVariable("noMorePtrs") != nil { // Starting in go 1.20
+			t.readOneBitBitmap(bitmap, min)
+		} else {
+			t.readMultiBitBitmap(bitmap, min)
+		}
+	} else if a.fieldVariable("heapArenaPtrScalar") != nil && a.fieldVariable("heapArenaPtrScalar").fieldVariable("bitmap") != nil { // go 1.22 without allocation headers
+		// TODO: This configuration only existed between CL 537978 and CL
+		// 538217 and was never released. Prune support.
+		bitmap = a.fieldVariable("heapArenaPtrScalar").fieldVariable("bitmap")
+		t.readOneBitBitmap(bitmap, min)
+	} else { // go 1.22 with allocation headers
+		panic("unimplemented")
+	}
+
+	spans := a.fieldVariable("spans")
+	arena := arena{
+		heapMin:      min,
+		heapMax:      max,
+		spanTableMin: core.Address(spans.Addr),
+		spanTableMax: core.Address(spans.Addr).Add(spans.Len * int64(ptrSize)),
+	}
+	if bitmap.Addr != 0 {
+		arena.bitmapMin = core.Address(bitmap.Addr)
+		arena.bitmapMax = core.Address(bitmap.Addr).Add(bitmap.Len)
+	}
+	return arena
+}
+
+// Read a one-bit bitmap (Go 1.20+), recording the heap pointers.
+func (t *Target) readOneBitBitmap(bitmap *Variable, min core.Address) {
+	ptrSize := t.BinInfo().Arch.PtrSize()
+	n := bitmap.Len
+	for i := int64(0); i < n; i++ {
+		// The array uses 1 bit per word of heap. See mbitmap.go for
+		// more information.
+		ptr, _ := bitmap.sliceAccess(int(i))
+		m, _ := constant.Uint64Val(ptr.Value)
+		bits := int64(8 * ptrSize)
+		for j := int64(0); j < bits; j++ {
+			if m>>uint(j)&1 != 0 {
+				t.setHeapPtr(min.Add((i*bits + j) * int64(ptrSize)))
+			}
+		}
+	}
+}
+
+// Read a multi-bit bitmap (Go 1.11-1.20), recording the heap pointers.
+func (t *Target) readMultiBitBitmap(bitmap *Variable, min core.Address) {
+	ptrSize := t.BinInfo().Arch.PtrSize()
+	n := bitmap.Len
+	for i := int64(0); i < n; i++ {
+		// The nth byte is composed of 4 object bits and 4 live/dead
+		// bits. We ignore the 4 live/dead bits, which are on the
+		// high order side of the byte.
+		//
+		// See mbitmap.go for more information on the format of
+		// the bitmap field of heapArena.
+		ptr, _ := bitmap.sliceAccess(int(i))
+		buf := make([]byte, 1)
+		_, _ = t.Memory().ReadMemory(buf, ptr.Addr)
+		m := buf[0]
+		for j := int64(0); j < 4; j++ {
+			if m>>uint(j)&1 != 0 {
+				t.setHeapPtr(min.Add((i*4 + j) * int64(ptrSize)))
+			}
+		}
+	}
+}
+
+func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
+	pageSize := scope.rtConstant("_PageSize")
+	// Span types
+	spanInUse := uint8(scope.rtConstant("_MSpanInUse"))
+
+	// Process spans.
+	if pageSize%heapInfoSize != 0 {
+		panic(fmt.Sprintf("page size not a multiple of %d", heapInfoSize))
+	}
+	allspans := mheap.fieldVariable("allspans")
+
+	n := allspans.Len
+	for i := int64(0); i < n; i++ {
+		s, _ := allspans.sliceAccess(int(i))
+		s = s.maybeDereference()
+		tmp, _ := constant.Uint64Val(s.fieldVariable("startAddr").Value)
+		min := core.Address(tmp)
+		tmp, _ = constant.Uint64Val(s.fieldVariable("elemsize").Value)
+		elemSize := int64(tmp)
+		tmp, _ = constant.Uint64Val(s.fieldVariable("npages").Value)
+		nPages := int64(tmp)
+		spanSize := nPages * pageSize
+		max := min.Add(spanSize)
+		st := s.fieldVariable("state")
+		if st.Kind == reflect.Struct && st.fieldVariable("s") != nil { // go1.14+
+			st = st.fieldVariable("s")
+		}
+		if st.Kind == reflect.Struct && st.fieldVariable("value") != nil { // go1.20+
+			st = st.fieldVariable("value")
+		}
+		st_, _ := constant.Uint64Val(st.Value)
+		switch uint8(st_) {
+		case spanInUse:
+
+			// initialize heap info records for all inuse spans.
+			for a := min; a < max; a += heapInfoSize {
+				h := t.allocHeapInfo(a)
+				h.base = min
+				h.size = elemSize
+			}
+
+			// Process special records.
+			for sp := s.fieldVariable("specials"); sp.Addr != 0; sp = sp.fieldVariable("next") {
+				sp = sp.maybeDereference() // *special to special
+				kind_, _ := constant.Uint64Val(sp.fieldVariable("kind").Value)
+				if uint8(kind_) != uint8(scope.rtConstant("_KindSpecialFinalizer")) {
+					// All other specials (just profile records) can't point into the heap.
+					continue
+				}
+				offset_, _ := constant.Uint64Val(sp.fieldVariable("offset").Value)
+				obj := min.Add(int64(uint16(offset_)))
+				spty, _ := sp.bi.findType("runtime.specialfinalizer")
+				t.specials = append(t.specials,
+					newVariable(fmt.Sprintf("finalizer for %x", obj), sp.Addr, spty, sp.bi, sp.mem))
+				// TODO: these aren't really "globals", as they
+				// are kept alive by the object they reference being alive.
+				// But we have no way of adding edges from an object to
+				// the corresponding finalizer data, so we punt on that thorny
+				// issue for now.
+			}
+		}
+	}
 }
 
 // Pid returns the pid of the target process.
@@ -598,8 +1013,7 @@ func isSuspended(t *Target, lbp *LogicalBreakpoint) bool {
 	return true
 }
 
-type dummyRecordingManipulation struct {
-}
+type dummyRecordingManipulation struct{}
 
 // Recorded always returns false for the native proc backend.
 func (*dummyRecordingManipulation) Recorded() (bool, string) { return false, "" }
