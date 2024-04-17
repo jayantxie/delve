@@ -409,17 +409,17 @@ func (t *Target) readHeap() {
 		level1size := level1Table.Len
 		for level1 := int64(0); level1 < level1size; level1++ {
 			ptr, _ := level1Table.sliceAccess(int(level1))
-			if ptr.Addr == 0 {
+			level2table := ptr.maybeDereference()
+			if level2table.Addr == 0 {
 				continue
 			}
-			level2table := ptr.maybeDereference()
 			level2size := level2table.Len
 			for level2 := int64(0); level2 < level2size; level2++ {
 				ptr, _ = level2table.sliceAccess(int(level2))
-				if ptr.Addr == 0 {
+				a := ptr.maybeDereference()
+				if a.Addr == 0 {
 					continue
 				}
-				a := ptr.maybeDereference()
 
 				min := Address(arenaSize*(level2+level1*level2size) - arenaBaseOffset)
 				max := min.Add(arenaSize)
@@ -488,6 +488,7 @@ func (t *Target) readArena19(mheap *Variable) arena {
 // pointers and return the arena size summary.
 func (t *Target) readArena(a *Variable, min, max Address) arena {
 	ptrSize := t.BinInfo().Arch.PtrSize()
+	a.loadValue(loadFullValueLongerStrings)
 
 	var bitmap *Variable
 	if bitmap = a.fieldVariable("bitmap"); bitmap != nil { // Before go 1.22
