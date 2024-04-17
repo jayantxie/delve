@@ -387,7 +387,7 @@ func (t *Target) readHeap() {
 	scope, _ := ThreadScope(t, t.CurrentThread())
 
 	mheap, _ := scope.findGlobalInternal("runtime.mheap_")
-	mheap.loadValue(loadFullValueLongerStrings)
+	mheap.loadValue(loadFullValueForMHeap)
 
 	var arenas []arena
 
@@ -488,7 +488,7 @@ func (t *Target) readArena19(mheap *Variable) arena {
 // pointers and return the arena size summary.
 func (t *Target) readArena(a *Variable, min, max Address) arena {
 	ptrSize := t.BinInfo().Arch.PtrSize()
-	a.loadValue(loadFullValueLongerStrings)
+	a.loadValue(loadFullValueForMHeap)
 
 	var bitmap *Variable
 	if bitmap = a.fieldVariable("bitmap"); bitmap != nil { // Before go 1.22
