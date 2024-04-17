@@ -21,7 +21,6 @@ import (
 	"github.com/go-delve/delve/pkg/dwarf/op"
 	"github.com/go-delve/delve/pkg/goversion"
 	"github.com/go-delve/delve/pkg/logflags"
-	"github.com/go-delve/delve/pkg/proc/core"
 )
 
 const (
@@ -1450,22 +1449,22 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 	}
 }
 
-func (v *Variable) lives() map[core.Address]bool {
+func (v *Variable) lives() map[Address]bool {
 	if !v.loaded {
 		panic("fieldVariable called on a variable that wasn't loaded")
 	}
-	live := make(map[core.Address]bool)
+	live := make(map[Address]bool)
 	switch v.Kind {
 	case reflect.Ptr, reflect.UnsafePointer:
-		live[core.Address(v.Children[0].Addr)] = true
+		live[Address(v.Children[0].Addr)] = true
 	case reflect.Chan:
-		live[core.Address(v.Base)] = true
+		live[Address(v.Base)] = true
 	case reflect.Map:
-		live[core.Address(v.Base)] = true
+		live[Address(v.Base)] = true
 	case reflect.String:
-		live[core.Address(v.Base)] = true
+		live[Address(v.Base)] = true
 	case reflect.Slice, reflect.Array:
-		live[core.Address(v.Base)] = true
+		live[Address(v.Base)] = true
 	case reflect.Struct:
 		for _, child := range v.Children {
 			for addr := range child.lives() {
@@ -1473,14 +1472,14 @@ func (v *Variable) lives() map[core.Address]bool {
 			}
 		}
 	case reflect.Interface:
-		live[core.Address(v.Children[0].Addr)] = true
+		live[Address(v.Children[0].Addr)] = true
 	case reflect.Complex64, reflect.Complex128:
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 	case reflect.Bool:
 	case reflect.Float32, reflect.Float64:
 	case reflect.Func:
-		live[core.Address(v.Base)] = true
+		live[Address(v.Base)] = true
 	default:
 	}
 	return live

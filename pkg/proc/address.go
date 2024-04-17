@@ -1,4 +1,4 @@
-package core
+package proc
 
 // An Address is a location in the inferior's address space.
 type Address uint64

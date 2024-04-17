@@ -1635,7 +1635,7 @@ func (d *Debugger) ObjectReference() (res []*proc.Variable, err error) {
 	//		res = append(res, pv[i])
 	//	}
 	//}
-	d.target.Selected.ForEachObject(func(x core.Address) bool {
+	d.target.Selected.ForEachObject(func(x proc.Address) bool {
 		res = append(res, &proc.Variable{Addr: uint64(x)})
 		return true
 	})

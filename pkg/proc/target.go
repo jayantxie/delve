@@ -13,7 +13,6 @@ import (
 	"github.com/go-delve/delve/pkg/dwarf/op"
 	"github.com/go-delve/delve/pkg/goversion"
 	"github.com/go-delve/delve/pkg/logflags"
-	"github.com/go-delve/delve/pkg/proc/core"
 	"github.com/go-delve/delve/pkg/proc/internal/ebpf"
 )
 
@@ -71,12 +70,12 @@ type Target struct {
 	gcache goroutineCache
 	iscgo  *bool
 
-	pages []core.Address // deterministic ordering of keys of pageTable
+	pages []Address // deterministic ordering of keys of pageTable
 
 	// data structure for fast object finding
 	// The key to these maps is the object address divided by
 	// pageTableSize * heapInfoSize.
-	pageTable map[core.Address]*pageTableEntry
+	pageTable map[Address]*pageTableEntry
 
 	specials []*Variable
 
@@ -238,10 +237,10 @@ func (t *Target) markObjects() {
 	// total size of live objects
 	var live int64
 
-	var q []core.Address
+	var q []Address
 
 	// Function to call when we find a new pointer.
-	add := func(x core.Address) {
+	add := func(x Address) {
 		h := t.findHeapInfo(x)
 		if h == nil { // not in heap or not in a valid span
 			// Invalid spans can happen with intra-stack pointers.
@@ -309,7 +308,7 @@ func (t *Target) markObjects() {
 			a := x.Add(i)
 			if t.isPtrFromHeap(a) {
 				sa, _ := readUintRaw(t.Memory(), uint64(a), 8)
-				add(core.Address(sa))
+				add(Address(sa))
 			}
 		}
 	}
@@ -318,7 +317,7 @@ func (t *Target) markObjects() {
 
 	// Initialize firstIdx fields in the heapInfo, for fast object index lookups.
 	n = 0
-	t.ForEachObject(func(x core.Address) bool {
+	t.ForEachObject(func(x Address) bool {
 		h := t.findHeapInfo(x)
 		if h.firstIdx == -1 {
 			h.firstIdx = n
@@ -333,7 +332,7 @@ func (t *Target) markObjects() {
 
 // ForEachObject calls fn with each object in the Go heap.
 // If fn returns false, ForEachObject returns immediately.
-func (p *Target) ForEachObject(fn func(x core.Address) bool) {
+func (p *Target) ForEachObject(fn func(x Address) bool) {
 	for _, k := range p.pages {
 		pt := p.pageTable[k]
 		for i := range pt {
@@ -342,7 +341,7 @@ func (p *Target) ForEachObject(fn func(x core.Address) bool) {
 			for m != 0 {
 				j := bits.TrailingZeros64(m)
 				m &= m - 1
-				x := k*pageTableSize*heapInfoSize + core.Address(i)*heapInfoSize + core.Address(j)*8
+				x := k*pageTableSize*heapInfoSize + Address(i)*heapInfoSize + Address(j)*8
 				if !fn(x) {
 					return
 				}
@@ -352,27 +351,27 @@ func (p *Target) ForEachObject(fn func(x core.Address) bool) {
 }
 
 // Size returns the size of x in bytes.
-func (t *Target) Size(x core.Address) int64 {
+func (t *Target) Size(x Address) int64 {
 	return t.findHeapInfo(x).size
 }
 
 // isPtrFromHeap reports whether the inferior at address a contains a pointer.
 // a must be somewhere in the heap.
-func (t *Target) isPtrFromHeap(a core.Address) bool {
+func (t *Target) isPtrFromHeap(a Address) bool {
 	return t.findHeapInfo(a).IsPtr(a, int64(t.BinInfo().Arch.PtrSize()))
 }
 
 // arena is a summary of the size of components of a heapArena.
 type arena struct {
-	heapMin core.Address
-	heapMax core.Address
+	heapMin Address
+	heapMax Address
 
 	// Optional.
-	bitmapMin core.Address
-	bitmapMax core.Address
+	bitmapMin Address
+	bitmapMax Address
 
-	spanTableMin core.Address
-	spanTableMax core.Address
+	spanTableMin Address
+	spanTableMax Address
 }
 
 func (t *Target) readHeap() {
@@ -383,7 +382,7 @@ func (t *Target) readHeap() {
 		return
 	}
 
-	t.pageTable = map[core.Address]*pageTableEntry{}
+	t.pageTable = map[Address]*pageTableEntry{}
 
 	scope, _ := ThreadScope(t, t.CurrentThread())
 
@@ -422,7 +421,7 @@ func (t *Target) readHeap() {
 				}
 				a := ptr.maybeDereference()
 
-				min := core.Address(arenaSize*(level2+level1*level2size) - arenaBaseOffset)
+				min := Address(arenaSize*(level2+level1*level2size) - arenaBaseOffset)
 				max := min.Add(arenaSize)
 
 				arenas = append(arenas, t.readArena(a, min, max))
@@ -456,12 +455,12 @@ func (t *Target) readArena19(mheap *Variable) arena {
 		return x
 	}
 
-	arenaStart := core.Address(asUint("arena_start"))
-	arenaUsed := core.Address(asUint("arena_used"))
-	arenaEnd := core.Address(asUint("arena_end"))
-	bitmapEnd := core.Address(asUint("bitmap"))
+	arenaStart := Address(asUint("arena_start"))
+	arenaUsed := Address(asUint("arena_used"))
+	arenaEnd := Address(asUint("arena_end"))
+	bitmapEnd := Address(asUint("bitmap"))
 	bitmapStart := bitmapEnd.Add(-int64(asUint("bitmap_mapped")))
-	spanTableStart := core.Address(mheap.fieldVariable("spans").Base)
+	spanTableStart := Address(mheap.fieldVariable("spans").Base)
 	spanTableEnd := spanTableStart.Add(mheap.fieldVariable("spans").Cap * ptrSize)
 
 	// Copy pointer bits to heap info.
@@ -487,7 +486,7 @@ func (t *Target) readArena19(mheap *Variable) arena {
 
 // Read a single heapArena. Go 1.11+, which has multiple areans. Record heap
 // pointers and return the arena size summary.
-func (t *Target) readArena(a *Variable, min, max core.Address) arena {
+func (t *Target) readArena(a *Variable, min, max Address) arena {
 	ptrSize := t.BinInfo().Arch.PtrSize()
 
 	var bitmap *Variable
@@ -510,18 +509,18 @@ func (t *Target) readArena(a *Variable, min, max core.Address) arena {
 	arena := arena{
 		heapMin:      min,
 		heapMax:      max,
-		spanTableMin: core.Address(spans.Addr),
-		spanTableMax: core.Address(spans.Addr).Add(spans.Len * int64(ptrSize)),
+		spanTableMin: Address(spans.Addr),
+		spanTableMax: Address(spans.Addr).Add(spans.Len * int64(ptrSize)),
 	}
 	if bitmap.Addr != 0 {
-		arena.bitmapMin = core.Address(bitmap.Addr)
-		arena.bitmapMax = core.Address(bitmap.Addr).Add(bitmap.Len)
+		arena.bitmapMin = Address(bitmap.Addr)
+		arena.bitmapMax = Address(bitmap.Addr).Add(bitmap.Len)
 	}
 	return arena
 }
 
 // Read a one-bit bitmap (Go 1.20+), recording the heap pointers.
-func (t *Target) readOneBitBitmap(bitmap *Variable, min core.Address) {
+func (t *Target) readOneBitBitmap(bitmap *Variable, min Address) {
 	ptrSize := t.BinInfo().Arch.PtrSize()
 	n := bitmap.Len
 	for i := int64(0); i < n; i++ {
@@ -539,7 +538,7 @@ func (t *Target) readOneBitBitmap(bitmap *Variable, min core.Address) {
 }
 
 // Read a multi-bit bitmap (Go 1.11-1.20), recording the heap pointers.
-func (t *Target) readMultiBitBitmap(bitmap *Variable, min core.Address) {
+func (t *Target) readMultiBitBitmap(bitmap *Variable, min Address) {
 	ptrSize := t.BinInfo().Arch.PtrSize()
 	n := bitmap.Len
 	for i := int64(0); i < n; i++ {
@@ -577,7 +576,7 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 		s, _ := allspans.sliceAccess(int(i))
 		s = s.maybeDereference()
 		tmp, _ := constant.Uint64Val(s.fieldVariable("startAddr").Value)
-		min := core.Address(tmp)
+		min := Address(tmp)
 		tmp, _ = constant.Uint64Val(s.fieldVariable("elemsize").Value)
 		elemSize := int64(tmp)
 		tmp, _ = constant.Uint64Val(s.fieldVariable("npages").Value)
