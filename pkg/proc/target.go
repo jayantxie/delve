@@ -586,9 +586,10 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 	for i := int64(0); i < n; i++ {
 		s, _ := allspans.sliceAccess(int(i))
 		s = s.maybeDereference()
+		s.loadValue(loadFullValueForArenas)
 		uint64_ := func(fieldName string) uint64 {
 			field := s.fieldVariable(fieldName)
-			field.loadValue(loadSingleValue)
+			field.loadValue(loadFullValueForArenas)
 			tmp, _ := constant.Uint64Val(field.Value)
 			return tmp
 		}
@@ -604,7 +605,7 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 		if st.Kind == reflect.Struct && st.fieldVariable("value") != nil { // go1.20+
 			st = st.fieldVariable("value")
 		}
-		st.loadValue(loadSingleValue)
+		st.loadValue(loadFullValueForArenas)
 		st_, _ := constant.Uint64Val(st.Value)
 		switch uint8(st_) {
 		case spanInUse:
@@ -619,14 +620,14 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 			for sp := s.fieldVariable("specials"); sp.Addr != 0; sp = sp.fieldVariable("next") {
 				sp = sp.maybeDereference() // *special to special
 				tmp := sp.fieldVariable("kind")
-				tmp.loadValue(loadSingleValue)
+				tmp.loadValue(loadFullValueForArenas)
 				kind_, _ := constant.Uint64Val(tmp.Value)
 				if uint8(kind_) != uint8(scope.rtConstant("_KindSpecialFinalizer")) {
 					// All other specials (just profile records) can't point into the heap.
 					continue
 				}
 				tmp = sp.fieldVariable("offset")
-				tmp.loadValue(loadSingleValue)
+				tmp.loadValue(loadFullValueForArenas)
 				offset_, _ := constant.Uint64Val(tmp.Value)
 				obj := min.Add(int64(uint16(offset_)))
 				spty, _ := sp.bi.findType("runtime.specialfinalizer")
