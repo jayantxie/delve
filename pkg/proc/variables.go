@@ -1002,16 +1002,18 @@ func (v *Variable) fieldVariableNew(name string) *Variable {
 	if v.Kind == reflect.Struct {
 		t := v.RealType.(*godwarf.StructType)
 		for _, field := range t.Field {
-			f, _ := v.toField(field)
-			f.Name = field.Name
-			if t.StructName == "" && len(f.Name) > 0 && f.Name[0] == '&' && f.Kind == reflect.Ptr {
-				// This struct is a closure struct and the field is actually a variable
-				// captured by reference.
-				f = f.maybeDereference()
-				f.Flags |= VariableEscaped
-				f.Name = field.Name[1:]
+			if field.Name == name {
+				f, _ := v.toField(field)
+				f.Name = field.Name
+				if t.StructName == "" && len(f.Name) > 0 && f.Name[0] == '&' && f.Kind == reflect.Ptr {
+					// This struct is a closure struct and the field is actually a variable
+					// captured by reference.
+					f = f.maybeDereference()
+					f.Flags |= VariableEscaped
+					f.Name = field.Name[1:]
+				}
+				return f
 			}
-			return f
 		}
 	}
 	return nil
