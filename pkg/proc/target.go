@@ -602,11 +602,11 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 		st.loadValue(loadFullValueForArenas)
 		if st.Kind == reflect.Struct && st.fieldVariable("s") != nil { // go1.14+
 			st = st.fieldVariable("s")
-			st.loadValue(loadFullValueForArenas)
+			st.loadValue(loadFullValue)
 		}
 		if st.Kind == reflect.Struct && st.fieldVariable("value") != nil { // go1.20+
 			st = st.fieldVariable("value")
-			st.loadValue(loadFullValueForArenas)
+			st.loadValue(loadFullValue)
 		}
 		st_, _ := constant.Uint64Val(st.Value)
 		switch uint8(st_) {
