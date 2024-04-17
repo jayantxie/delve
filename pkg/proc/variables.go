@@ -187,7 +187,7 @@ var (
 	loadSingleValue            = LoadConfig{false, 0, 64, 0, 0, 0}
 	loadFullValue              = LoadConfig{true, 1, 64, 64, -1, 0}
 	loadFullValueLongerStrings = LoadConfig{true, 1, 1024 * 1024, 64, -1, 0}
-	loadFullValueForMHeap      = LoadConfig{true, 1, 1024 * 1024 * 1024, 1024 * 1024 * 1024, -1, 1024 * 1024 * 1024}
+	loadFullValueForArenas     = LoadConfig{false, 0, 0, math.MaxInt, -1, 0}
 )
 
 // G status, from: src/runtime/runtime2.go

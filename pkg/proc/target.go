@@ -387,7 +387,7 @@ func (t *Target) readHeap() {
 	scope, _ := ThreadScope(t, t.CurrentThread())
 
 	mheap, _ := scope.findGlobalInternal("runtime.mheap_")
-	mheap.loadValue(loadFullValueForMHeap)
+	mheap.loadValue(loadFullValueForArenas)
 
 	var arenas []arena
 
@@ -406,6 +406,7 @@ func (t *Target) readHeap() {
 		}
 
 		level1Table := mheap.fieldVariable("arenas")
+		level1Table.loadValue(loadFullValueForArenas)
 		level1size := level1Table.Len
 		for level1 := int64(0); level1 < level1size; level1++ {
 			ptr, _ := level1Table.sliceAccess(int(level1))
@@ -460,8 +461,10 @@ func (t *Target) readArena19(mheap *Variable) arena {
 	arenaEnd := Address(asUint("arena_end"))
 	bitmapEnd := Address(asUint("bitmap"))
 	bitmapStart := bitmapEnd.Add(-int64(asUint("bitmap_mapped")))
-	spanTableStart := Address(mheap.fieldVariable("spans").Base)
-	spanTableEnd := spanTableStart.Add(mheap.fieldVariable("spans").Cap * ptrSize)
+	spansField := mheap.fieldVariable("spans")
+	spansField.loadValue(loadFullValueForArenas)
+	spanTableStart := Address(spansField.Base)
+	spanTableEnd := spanTableStart.Add(spansField.Cap * ptrSize)
 
 	// Copy pointer bits to heap info.
 	// Note that the pointer bits are stored backwards.
@@ -488,25 +491,32 @@ func (t *Target) readArena19(mheap *Variable) arena {
 // pointers and return the arena size summary.
 func (t *Target) readArena(a *Variable, min, max Address) arena {
 	ptrSize := t.BinInfo().Arch.PtrSize()
-	a.loadValue(loadFullValueForMHeap)
+	a.loadValue(loadFullValueForArenas)
 
 	var bitmap *Variable
-	if bitmap = a.fieldVariable("bitmap"); bitmap != nil { // Before go 1.22
+	if bitmap = a.fieldVariable("bitmap"); bitmap != nil {
+		bitmap.loadValue(loadFullValueForArenas)  // Before go 1.22
 		if a.fieldVariable("noMorePtrs") != nil { // Starting in go 1.20
 			t.readOneBitBitmap(bitmap, min)
 		} else {
 			t.readMultiBitBitmap(bitmap, min)
 		}
-	} else if a.fieldVariable("heapArenaPtrScalar") != nil && a.fieldVariable("heapArenaPtrScalar").fieldVariable("bitmap") != nil { // go 1.22 without allocation headers
-		// TODO: This configuration only existed between CL 537978 and CL
-		// 538217 and was never released. Prune support.
-		bitmap = a.fieldVariable("heapArenaPtrScalar").fieldVariable("bitmap")
-		t.readOneBitBitmap(bitmap, min)
+	} else if heapArenaPtrScalar := a.fieldVariable("heapArenaPtrScalar"); heapArenaPtrScalar != nil {
+		heapArenaPtrScalar.loadValue(loadFullValueForArenas)
+		if bitmap = heapArenaPtrScalar.fieldVariable("bitmap"); bitmap != nil { // go 1.22 without allocation headers
+			// TODO: This configuration only existed between CL 537978 and CL
+			// 538217 and was never released. Prune support.
+			bitmap.loadValue(loadFullValueForArenas)
+			t.readOneBitBitmap(bitmap, min)
+		} else {
+			panic("unimplemented")
+		}
 	} else { // go 1.22 with allocation headers
 		panic("unimplemented")
 	}
 
 	spans := a.fieldVariable("spans")
+	spans.loadValue(loadFullValueForArenas)
 	arena := arena{
 		heapMin:      min,
 		heapMax:      max,
