@@ -586,12 +586,15 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 	for i := int64(0); i < n; i++ {
 		s, _ := allspans.sliceAccess(int(i))
 		s = s.maybeDereference()
-		tmp, _ := constant.Uint64Val(s.fieldVariable("startAddr").Value)
-		min := Address(tmp)
-		tmp, _ = constant.Uint64Val(s.fieldVariable("elemsize").Value)
-		elemSize := int64(tmp)
-		tmp, _ = constant.Uint64Val(s.fieldVariable("npages").Value)
-		nPages := int64(tmp)
+		uint64_ := func(fieldName string) uint64 {
+			field := s.fieldVariable(fieldName)
+			field.loadValue(loadSingleValue)
+			tmp, _ := constant.Uint64Val(field.Value)
+			return tmp
+		}
+		min := Address(uint64_("startAddr"))
+		elemSize := int64(uint64_("elemsize"))
+		nPages := int64(uint64_("npages"))
 		spanSize := nPages * pageSize
 		max := min.Add(spanSize)
 		st := s.fieldVariable("state")
@@ -601,10 +604,10 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 		if st.Kind == reflect.Struct && st.fieldVariable("value") != nil { // go1.20+
 			st = st.fieldVariable("value")
 		}
+		st.loadValue(loadSingleValue)
 		st_, _ := constant.Uint64Val(st.Value)
 		switch uint8(st_) {
 		case spanInUse:
-
 			// initialize heap info records for all inuse spans.
 			for a := min; a < max; a += heapInfoSize {
 				h := t.allocHeapInfo(a)
@@ -615,12 +618,16 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 			// Process special records.
 			for sp := s.fieldVariable("specials"); sp.Addr != 0; sp = sp.fieldVariable("next") {
 				sp = sp.maybeDereference() // *special to special
-				kind_, _ := constant.Uint64Val(sp.fieldVariable("kind").Value)
+				tmp := sp.fieldVariable("kind")
+				tmp.loadValue(loadSingleValue)
+				kind_, _ := constant.Uint64Val(tmp.Value)
 				if uint8(kind_) != uint8(scope.rtConstant("_KindSpecialFinalizer")) {
 					// All other specials (just profile records) can't point into the heap.
 					continue
 				}
-				offset_, _ := constant.Uint64Val(sp.fieldVariable("offset").Value)
+				tmp = sp.fieldVariable("offset")
+				tmp.loadValue(loadSingleValue)
+				offset_, _ := constant.Uint64Val(tmp.Value)
 				obj := min.Add(int64(uint16(offset_)))
 				spty, _ := sp.bi.findType("runtime.specialfinalizer")
 				t.specials = append(t.specials,
