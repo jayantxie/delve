@@ -599,13 +599,15 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 		spanSize := nPages * pageSize
 		max := min.Add(spanSize)
 		st := s.fieldVariable("state")
+		st.loadValue(loadFullValueForArenas)
 		if st.Kind == reflect.Struct && st.fieldVariable("s") != nil { // go1.14+
 			st = st.fieldVariable("s")
+			st.loadValue(loadFullValueForArenas)
 		}
 		if st.Kind == reflect.Struct && st.fieldVariable("value") != nil { // go1.20+
 			st = st.fieldVariable("value")
+			st.loadValue(loadFullValueForArenas)
 		}
-		st.loadValue(loadFullValueForArenas)
 		st_, _ := constant.Uint64Val(st.Value)
 		switch uint8(st_) {
 		case spanInUse:
@@ -619,6 +621,7 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 			// Process special records.
 			for sp := s.fieldVariable("specials"); sp.Addr != 0; sp = sp.fieldVariable("next") {
 				sp = sp.maybeDereference() // *special to special
+				sp.loadValue(loadFullValueForArenas)
 				tmp := sp.fieldVariable("kind")
 				tmp.loadValue(loadFullValueForArenas)
 				kind_, _ := constant.Uint64Val(tmp.Value)
