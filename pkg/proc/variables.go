@@ -187,7 +187,6 @@ var (
 	loadSingleValue            = LoadConfig{false, 0, 64, 0, 0, 0}
 	loadFullValue              = LoadConfig{true, 1, 64, 64, -1, 0}
 	loadFullValueLongerStrings = LoadConfig{true, 1, 1024 * 1024, 64, -1, 0}
-	loadFullValueForArenas     = LoadConfig{false, 0, 0, math.MaxInt, -1, 0}
 )
 
 // G status, from: src/runtime/runtime2.go
@@ -997,6 +996,60 @@ func (v *Variable) fieldVariable(name string) *Variable {
 		}
 	}
 	return nil
+}
+
+func (v *Variable) fieldVariableNew(name string) *Variable {
+	if v.Kind == reflect.Struct {
+		t := v.RealType.(*godwarf.StructType)
+		for _, field := range t.Field {
+			f, _ := v.toField(field)
+			f.Name = field.Name
+			if t.StructName == "" && len(f.Name) > 0 && f.Name[0] == '&' && f.Kind == reflect.Ptr {
+				// This struct is a closure struct and the field is actually a variable
+				// captured by reference.
+				f = f.maybeDereference()
+				f.Flags |= VariableEscaped
+				f.Name = field.Name[1:]
+			}
+			return f
+		}
+	}
+	return nil
+}
+
+func (v *Variable) sliceAccessNew(idx int) (*Variable, error) {
+	wrong := false
+	if v.Flags&VariableCPtr == 0 {
+		wrong = idx < 0 || int64(idx) >= v.Len
+	} else {
+		wrong = idx < 0
+	}
+	if wrong {
+		return nil, fmt.Errorf("index out of bounds")
+	}
+	mem := v.mem
+	if v.Kind != reflect.Array {
+		mem = DereferenceMemory(mem)
+	}
+	return v.newVariable("", v.Base+uint64(int64(idx)*v.stride), v.fieldType, mem), nil
+}
+
+func (v *Variable) maybeDereferenceNew() *Variable {
+	if v.Unreadable != nil {
+		return v
+	}
+	switch t := v.RealType.(type) {
+	case *godwarf.PtrType:
+		ptrval, err := readUintRaw(v.mem, v.Addr, t.ByteSize)
+		r := v.newVariable("", ptrval, t.Type, DereferenceMemory(v.mem))
+		if err != nil {
+			r.Unreadable = err
+		}
+
+		return r
+	default:
+		return v
+	}
 }
 
 var errTracebackAncestorsDisabled = errors.New("tracebackancestors is disabled")

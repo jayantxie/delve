@@ -387,11 +387,10 @@ func (t *Target) readHeap() {
 	scope, _ := ThreadScope(t, t.CurrentThread())
 
 	mheap, _ := scope.findGlobalInternal("runtime.mheap_")
-	mheap.loadValue(loadFullValueForArenas)
 
 	var arenas []arena
 
-	if mheap.fieldVariable("spans") != nil {
+	if mheap.fieldVariableNew("spans") != nil {
 		// go 1.9 or 1.10. There is a single arena.
 		arenas = append(arenas, t.readArena19(mheap))
 	} else {
@@ -405,19 +404,18 @@ func (t *Target) readHeap() {
 			panic("arenaBaseOffset must be 0 for 32-bit inferior")
 		}
 
-		level1Table := mheap.fieldVariable("arenas")
-		level1Table.loadValue(loadFullValueForArenas)
+		level1Table := mheap.fieldVariableNew("arenas")
 		level1size := level1Table.Len
 		for level1 := int64(0); level1 < level1size; level1++ {
-			ptr, _ := level1Table.sliceAccess(int(level1))
-			level2table := ptr.maybeDereference()
+			ptr, _ := level1Table.sliceAccessNew(int(level1))
+			level2table := ptr.maybeDereferenceNew()
 			if level2table.Addr == 0 {
 				continue
 			}
 			level2size := level2table.Len
 			for level2 := int64(0); level2 < level2size; level2++ {
-				ptr, _ = level2table.sliceAccess(int(level2))
-				a := ptr.maybeDereference()
+				ptr, _ = level2table.sliceAccessNew(int(level2))
+				a := ptr.maybeDereferenceNew()
 				if a.Addr == 0 {
 					continue
 				}
@@ -452,7 +450,7 @@ func (t *Target) readArena19(mheap *Variable) arena {
 	logPtrSize := t.BinInfo().Arch.LogPtrSize()
 
 	asUint := func(name string) uint64 {
-		x, _ := mheap.fieldVariable(name).asUint()
+		x, _ := mheap.fieldVariableNew(name).asUint()
 		return x
 	}
 
@@ -461,8 +459,7 @@ func (t *Target) readArena19(mheap *Variable) arena {
 	arenaEnd := Address(asUint("arena_end"))
 	bitmapEnd := Address(asUint("bitmap"))
 	bitmapStart := bitmapEnd.Add(-int64(asUint("bitmap_mapped")))
-	spansField := mheap.fieldVariable("spans")
-	spansField.loadValue(loadFullValueForArenas)
+	spansField := mheap.fieldVariableNew("spans")
 	spanTableStart := Address(spansField.Base)
 	spanTableEnd := spanTableStart.Add(spansField.Cap * ptrSize)
 
@@ -491,22 +488,18 @@ func (t *Target) readArena19(mheap *Variable) arena {
 // pointers and return the arena size summary.
 func (t *Target) readArena(a *Variable, min, max Address) arena {
 	ptrSize := t.BinInfo().Arch.PtrSize()
-	a.loadValue(loadFullValueForArenas)
 
 	var bitmap *Variable
-	if bitmap = a.fieldVariable("bitmap"); bitmap != nil {
-		bitmap.loadValue(loadFullValueForArenas)  // Before go 1.22
-		if a.fieldVariable("noMorePtrs") != nil { // Starting in go 1.20
+	if bitmap = a.fieldVariableNew("bitmap"); bitmap != nil {
+		if a.fieldVariableNew("noMorePtrs") != nil { // Starting in go 1.20
 			t.readOneBitBitmap(bitmap, min)
 		} else {
 			t.readMultiBitBitmap(bitmap, min)
 		}
-	} else if heapArenaPtrScalar := a.fieldVariable("heapArenaPtrScalar"); heapArenaPtrScalar != nil {
-		heapArenaPtrScalar.loadValue(loadFullValueForArenas)
-		if bitmap = heapArenaPtrScalar.fieldVariable("bitmap"); bitmap != nil { // go 1.22 without allocation headers
+	} else if heapArenaPtrScalar := a.fieldVariableNew("heapArenaPtrScalar"); heapArenaPtrScalar != nil {
+		if bitmap = heapArenaPtrScalar.fieldVariableNew("bitmap"); bitmap != nil { // go 1.22 without allocation headers
 			// TODO: This configuration only existed between CL 537978 and CL
 			// 538217 and was never released. Prune support.
-			bitmap.loadValue(loadFullValueForArenas)
 			t.readOneBitBitmap(bitmap, min)
 		} else {
 			panic("unimplemented")
@@ -515,8 +508,7 @@ func (t *Target) readArena(a *Variable, min, max Address) arena {
 		panic("unimplemented")
 	}
 
-	spans := a.fieldVariable("spans")
-	spans.loadValue(loadFullValueForArenas)
+	spans := a.fieldVariableNew("spans")
 	arena := arena{
 		heapMin:      min,
 		heapMax:      max,
@@ -537,7 +529,7 @@ func (t *Target) readOneBitBitmap(bitmap *Variable, min Address) {
 	for i := int64(0); i < n; i++ {
 		// The array uses 1 bit per word of heap. See mbitmap.go for
 		// more information.
-		ptr, _ := bitmap.sliceAccess(int(i))
+		ptr, _ := bitmap.sliceAccessNew(int(i))
 		m, _ := constant.Uint64Val(ptr.Value)
 		bits := int64(8 * ptrSize)
 		for j := int64(0); j < bits; j++ {
@@ -559,7 +551,7 @@ func (t *Target) readMultiBitBitmap(bitmap *Variable, min Address) {
 		//
 		// See mbitmap.go for more information on the format of
 		// the bitmap field of heapArena.
-		ptr, _ := bitmap.sliceAccess(int(i))
+		ptr, _ := bitmap.sliceAccessNew(int(i))
 		buf := make([]byte, 1)
 		_, _ = t.Memory().ReadMemory(buf, ptr.Addr)
 		m := buf[0]
@@ -580,16 +572,14 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 	if pageSize%heapInfoSize != 0 {
 		panic(fmt.Sprintf("page size not a multiple of %d", heapInfoSize))
 	}
-	allspans := mheap.fieldVariable("allspans")
+	allspans := mheap.fieldVariableNew("allspans")
 
 	n := allspans.Len
 	for i := int64(0); i < n; i++ {
-		s, _ := allspans.sliceAccess(int(i))
-		s = s.maybeDereference()
-		s.loadValue(loadFullValueForArenas)
+		s, _ := allspans.sliceAccessNew(int(i))
+		s = s.maybeDereferenceNew()
 		uint64_ := func(fieldName string) uint64 {
-			field := s.fieldVariable(fieldName)
-			field.loadValue(loadFullValueForArenas)
+			field := s.fieldVariableNew(fieldName)
 			tmp, _ := constant.Uint64Val(field.Value)
 			return tmp
 		}
@@ -598,15 +588,16 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 		nPages := int64(uint64_("npages"))
 		spanSize := nPages * pageSize
 		max := min.Add(spanSize)
-		st := s.fieldVariable("state")
-		st.loadValue(loadFullValueForArenas)
-		if st.Kind == reflect.Struct && st.fieldVariable("s") != nil { // go1.14+
-			st = st.fieldVariable("s")
-			st.loadValue(loadFullValue)
+		st := s.fieldVariableNew("state")
+		if st.Kind == reflect.Struct {
+			if tmp := st.fieldVariableNew("s"); tmp != nil { // go1.14+
+				st = tmp
+			}
 		}
-		if st.Kind == reflect.Struct && st.fieldVariable("value") != nil { // go1.20+
-			st = st.fieldVariable("value")
-			st.loadValue(loadFullValue)
+		if st.Kind == reflect.Struct {
+			if tmp := st.fieldVariableNew("value"); tmp != nil { // go1.20+
+				st = tmp
+			}
 		}
 		st_, _ := constant.Uint64Val(st.Value)
 		switch uint8(st_) {
@@ -619,18 +610,15 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 			}
 
 			// Process special records.
-			for sp := s.fieldVariable("specials"); sp.Addr != 0; sp = sp.fieldVariable("next") {
-				sp = sp.maybeDereference() // *special to special
-				sp.loadValue(loadFullValueForArenas)
-				tmp := sp.fieldVariable("kind")
-				tmp.loadValue(loadFullValueForArenas)
+			for sp := s.fieldVariableNew("specials"); sp.Addr != 0; sp = sp.fieldVariableNew("next") {
+				sp = sp.maybeDereferenceNew() // *special to special
+				tmp := sp.fieldVariableNew("kind")
 				kind_, _ := constant.Uint64Val(tmp.Value)
 				if uint8(kind_) != uint8(scope.rtConstant("_KindSpecialFinalizer")) {
 					// All other specials (just profile records) can't point into the heap.
 					continue
 				}
-				tmp = sp.fieldVariable("offset")
-				tmp.loadValue(loadFullValueForArenas)
+				tmp = sp.fieldVariableNew("offset")
 				offset_, _ := constant.Uint64Val(tmp.Value)
 				obj := min.Add(int64(uint16(offset_)))
 				spty, _ := sp.bi.findType("runtime.specialfinalizer")
