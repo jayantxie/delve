@@ -685,8 +685,11 @@ func (scope *EvalScope) findGlobal(pkgName, varName string) (*Variable, error) {
 
 func (scope *EvalScope) rtConstant(name string) int64 {
 	x, _ := scope.findGlobalInternal("runtime." + name)
-	v, _ := constant.Int64Val(x.Value)
-	return v
+	if x != nil {
+		v, _ := constant.Int64Val(x.Value)
+		return v
+	}
+	return 0
 }
 
 func (scope *EvalScope) findGlobalInternal(name string) (*Variable, error) {
