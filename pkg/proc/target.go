@@ -572,6 +572,9 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 	pageSize := scope.rtConstant("_PageSize")
 	// Span types
 	spanInUse := uint8(scope.rtConstant("_MSpanInUse"))
+	if spanInUse == 0 {
+		spanInUse = uint8(scope.rtConstant("mSpanInUse"))
+	}
 
 	// Process spans.
 	if pageSize%heapInfoSize != 0 {
@@ -626,6 +629,7 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 					continue
 				}
 				tmp = sp.fieldVariableNew("offset")
+				tmp.loadValue(loadSingleValue)
 				offset_, _ := constant.Uint64Val(tmp.Value)
 				obj := min.Add(int64(uint16(offset_)))
 				spty, _ := sp.bi.findType("runtime.specialfinalizer")
