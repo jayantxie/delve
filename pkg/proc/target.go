@@ -268,20 +268,18 @@ func (t *Target) markObjects() {
 	for _, gr := range grs {
 		sf, _ := GoroutineStacktrace(t, gr, 512, 0)
 		for i := range sf {
-			if sf[i].Current.Fn != nil {
-				scope := FrameToScope(t, t.Memory(), nil, 0, sf[i:]...)
-				locals, _ := scope.LocalVariables(loadFullValueLongerStrings)
-				for _, l := range locals {
-					for addr := range l.lives() {
-						add(addr)
-					}
+			scope, _ := ConvertEvalScope(t, gr.ID, i, 0)
+			locals, _ := scope.LocalVariables(loadSingleValue)
+			for _, l := range locals {
+				for addr := range l.lives() {
+					add(addr)
 				}
 			}
 		}
 	}
 
 	scope, _ := ThreadScope(t, t.CurrentThread())
-	pv, _ := scope.PackageVariables(loadFullValueLongerStrings)
+	pv, _ := scope.PackageVariables(loadSingleValue)
 	for i := range pv {
 		for addr := range pv[i].lives() {
 			add(addr)
@@ -580,6 +578,7 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 		s = s.maybeDereferenceNew()
 		uint64_ := func(fieldName string) uint64 {
 			field := s.fieldVariableNew(fieldName)
+			field.loadValue(loadSingleValue)
 			tmp, _ := constant.Uint64Val(field.Value)
 			return tmp
 		}
@@ -599,6 +598,7 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 				st = tmp
 			}
 		}
+		st.loadValue(loadSingleValue)
 		st_, _ := constant.Uint64Val(st.Value)
 		switch uint8(st_) {
 		case spanInUse:
@@ -610,9 +610,9 @@ func (t *Target) readSpans(scope *EvalScope, mheap *Variable, arenas []arena) {
 			}
 
 			// Process special records.
-			for sp := s.fieldVariableNew("specials"); sp.Addr != 0; sp = sp.fieldVariableNew("next") {
-				sp = sp.maybeDereferenceNew() // *special to special
+			for sp := s.fieldVariableNew("specials").maybeDereferenceNew(); sp.Addr != 0; sp = sp.fieldVariableNew("next").maybeDereferenceNew() {
 				tmp := sp.fieldVariableNew("kind")
+				tmp.loadValue(loadSingleValue)
 				kind_, _ := constant.Uint64Val(tmp.Value)
 				if uint8(kind_) != uint8(scope.rtConstant("_KindSpecialFinalizer")) {
 					// All other specials (just profile records) can't point into the heap.

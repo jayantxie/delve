@@ -1507,7 +1507,7 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 
 func (v *Variable) lives() map[Address]bool {
 	if !v.loaded {
-		panic("fieldVariable called on a variable that wasn't loaded")
+		panic("lives called on a variable that wasn't loaded")
 	}
 	live := make(map[Address]bool)
 	switch v.Kind {
