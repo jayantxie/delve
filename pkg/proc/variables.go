@@ -1511,31 +1511,20 @@ func (v *Variable) lives() map[Address]bool {
 	}
 	live := make(map[Address]bool)
 	switch v.Kind {
-	case reflect.Ptr, reflect.UnsafePointer:
-		live[Address(v.Children[0].Addr)] = true
-	case reflect.Chan:
-		live[Address(v.Base)] = true
-	case reflect.Map:
-		live[Address(v.Base)] = true
-	case reflect.String:
-		live[Address(v.Base)] = true
-	case reflect.Slice, reflect.Array:
-		live[Address(v.Base)] = true
+	case reflect.Ptr, reflect.UnsafePointer, reflect.Interface:
+		if len(v.Children) > 0 && v.Children[0].Addr != 0 {
+			live[Address(v.Children[0].Addr)] = true
+		}
+	case reflect.Chan, reflect.Map, reflect.String, reflect.Slice, reflect.Array, reflect.Func:
+		if v.Base != 0 {
+			live[Address(v.Base)] = true
+		}
 	case reflect.Struct:
 		for _, child := range v.Children {
 			for addr := range child.lives() {
 				live[addr] = true
 			}
 		}
-	case reflect.Interface:
-		live[Address(v.Children[0].Addr)] = true
-	case reflect.Complex64, reflect.Complex128:
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-	case reflect.Bool:
-	case reflect.Float32, reflect.Float64:
-	case reflect.Func:
-		live[Address(v.Base)] = true
 	default:
 	}
 	return live

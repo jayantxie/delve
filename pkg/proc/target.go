@@ -271,26 +271,33 @@ func (t *Target) markObjects() {
 			scope, _ := ConvertEvalScope(t, gr.ID, i, 0)
 			locals, _ := scope.LocalVariables(loadSingleValue)
 			for _, l := range locals {
-				for addr := range l.lives() {
-					add(addr)
+				if l.Addr != 0 {
+					for addr := range l.lives() {
+						add(addr)
+					}
 				}
 			}
 		}
 	}
 
 	scope, _ := ThreadScope(t, t.CurrentThread())
-	pv, _ := scope.PackageVariables(loadSingleValue)
-	for i := range pv {
-		for addr := range pv[i].lives() {
-			add(addr)
+	pvs, _ := scope.PackageVariables(loadSingleValue)
+	for _, pv := range pvs {
+		if pv.Addr != 0 {
+			for addr := range pv.lives() {
+				add(addr)
+			}
 		}
 	}
 
 	// Finalizers
 	for _, r := range t.specials {
 		for _, child := range r.Children {
-			for addr := range child.lives() {
-				add(addr)
+			if child.Addr != 0 {
+				child.loadValue(loadSingleValue)
+				for addr := range child.lives() {
+					add(addr)
+				}
 			}
 		}
 	}
