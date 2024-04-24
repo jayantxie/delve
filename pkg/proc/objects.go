@@ -133,7 +133,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 		ptrval, _ := readUintRaw(s.mem, x.Addr, int64(s.bi.Arch.PtrSize()))
 		if ptrval != 0 {
 			if y := s.findObject(Address(ptrval), resolveTypedef(typ.Type)); y != nil {
-				xv := &Variable{BriefVariable: x.BriefVariable, mem: s.mem}
+				xv := newVariable("", x.Addr, x.RealType, s.bi, s.mem)
 				it := xv.mapIterator()
 				if it == nil {
 					return
