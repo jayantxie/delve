@@ -91,16 +91,20 @@ const (
 	variableTrustLen
 )
 
+type BriefVariable struct {
+	Addr     uint64
+	Name     string
+	RealType godwarf.Type
+}
+
 // Variable represents a variable. It contains the address, name,
 // type and other information parsed from both the Dwarf information
 // and the memory of the debugged process.
 // If OnlyAddr is true, the variables value has not been loaded.
 type Variable struct {
-	Addr      uint64
+	BriefVariable
 	OnlyAddr  bool
-	Name      string
 	DwarfType godwarf.Type
-	RealType  godwarf.Type
 	Kind      reflect.Kind
 	mem       MemoryReadWriter
 	bi        *BinaryInfo
@@ -639,8 +643,10 @@ func newVariable(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInf
 	}
 
 	v := &Variable{
-		Name:      name,
-		Addr:      addr,
+		BriefVariable: BriefVariable{
+			Name: name,
+			Addr: addr,
+		},
 		DwarfType: dwarfType,
 		mem:       mem,
 		bi:        bi,
@@ -778,11 +784,13 @@ func newConstant(val constant.Value, mem MemoryReadWriter) *Variable {
 }
 
 var nilVariable = &Variable{
-	Name:     "nil",
-	Addr:     0,
+	BriefVariable: BriefVariable{
+		Name: "nil",
+		Addr: 0,
+	},
+	Children: []Variable{{BriefVariable: BriefVariable{Addr: 0}, OnlyAddr: true}},
 	Base:     0,
 	Kind:     reflect.Ptr,
-	Children: []Variable{{Addr: 0, OnlyAddr: true}},
 }
 
 func (v *Variable) clone() *Variable {
@@ -1503,31 +1511,6 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 	default:
 		v.Unreadable = fmt.Errorf("unknown or unsupported kind: %q", v.Kind.String())
 	}
-}
-
-func (v *Variable) lives() map[Address]bool {
-	if !v.loaded {
-		panic("lives called on a variable that wasn't loaded")
-	}
-	live := make(map[Address]bool)
-	switch v.Kind {
-	case reflect.Ptr, reflect.UnsafePointer, reflect.Interface:
-		if len(v.Children) > 0 && v.Children[0].Addr != 0 {
-			live[Address(v.Children[0].Addr)] = true
-		}
-	case reflect.Chan, reflect.Map, reflect.String, reflect.Slice, reflect.Array, reflect.Func:
-		if v.Base != 0 {
-			live[Address(v.Base)] = true
-		}
-	case reflect.Struct:
-		for _, child := range v.Children {
-			for addr := range child.lives() {
-				live[addr] = true
-			}
-		}
-	default:
-	}
-	return live
 }
 
 // convertToEface converts srcv into an "interface {}" and writes it to

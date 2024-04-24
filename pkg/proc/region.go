@@ -8,8 +8,8 @@ import (
 	"github.com/go-delve/delve/pkg/dwarf/godwarf"
 )
 
-func (v *Variable) toRegion() region {
-	return region{
+func (v *Variable) toRegion() *region {
+	return &region{
 		mem: v.mem,
 		bi:  v.bi,
 		a:   Address(v.Addr),
@@ -28,8 +28,13 @@ type region struct {
 	typ godwarf.Type
 }
 
+func (r *region) clone() *region {
+	nr := *r
+	return &nr
+}
+
 // Address returns the address that a region of pointer type points to.
-func (r region) Address() Address {
+func (r *region) Address() Address {
 	switch t := r.typ.(type) {
 	case *godwarf.PtrType:
 		ptr, _ := readUintRaw(r.mem, uint64(r.a), t.Size())
@@ -40,7 +45,7 @@ func (r region) Address() Address {
 }
 
 // Int returns the int value stored in r.
-func (r region) Int() int64 {
+func (r *region) Int() int64 {
 	switch t := r.typ.(type) {
 	case *godwarf.IntType:
 		if t.Size() != int64(r.bi.Arch.PtrSize()) {
@@ -54,7 +59,7 @@ func (r region) Int() int64 {
 }
 
 // Uintptr returns the uintptr value stored in r.
-func (r region) Uintptr() uint64 {
+func (r *region) Uintptr() uint64 {
 	switch t := r.typ.(type) {
 	case *godwarf.UintType:
 		if t.Size() != int64(r.bi.Arch.PtrSize()) {
@@ -68,11 +73,11 @@ func (r region) Uintptr() uint64 {
 }
 
 // Deref loads from a pointer. r must contain a pointer.
-func (r region) Deref() region {
+func (r *region) Deref() *region {
 	switch t := r.typ.(type) {
 	case *godwarf.PtrType:
 		ptr, _ := readUintRaw(r.mem, uint64(r.a), t.Size())
-		return region{mem: r.mem, bi: r.bi, a: Address(ptr), typ: resolveTypedef(t.Type)}
+		return &region{mem: r.mem, bi: r.bi, a: Address(ptr), typ: resolveTypedef(t.Type)}
 	default:
 		panic("can't deref on non-pointer: " + t.String())
 	}
@@ -80,7 +85,7 @@ func (r region) Deref() region {
 
 // Uint64 returns the uint64 value stored in r.
 // r must have type uint64.
-func (r region) Uint64() uint64 {
+func (r *region) Uint64() uint64 {
 	switch t := r.typ.(type) {
 	case *godwarf.UintType:
 		if t.Size() != 8 {
@@ -95,7 +100,7 @@ func (r region) Uint64() uint64 {
 
 // Uint32 returns the uint32 value stored in r.
 // r must have type uint32.
-func (r region) Uint32() uint32 {
+func (r *region) Uint32() uint32 {
 	switch t := r.typ.(type) {
 	case *godwarf.UintType:
 		if t.Size() != 4 {
@@ -110,7 +115,7 @@ func (r region) Uint32() uint32 {
 
 // Int32 returns the int32 value stored in r.
 // r must have type int32.
-func (r region) Int32() int32 {
+func (r *region) Int32() int32 {
 	switch t := r.typ.(type) {
 	case *godwarf.IntType:
 		if t.Size() != 4 {
@@ -125,7 +130,7 @@ func (r region) Int32() int32 {
 
 // Uint16 returns the uint16 value stored in r.
 // r must have type uint16.
-func (r region) Uint16() uint16 {
+func (r *region) Uint16() uint16 {
 	switch t := r.typ.(type) {
 	case *godwarf.UintType:
 		if t.Size() != 2 {
@@ -140,7 +145,7 @@ func (r region) Uint16() uint16 {
 
 // Uint8 returns the uint8 value stored in r.
 // r must have type uint8.
-func (r region) Uint8() uint8 {
+func (r *region) Uint8() uint8 {
 	switch t := r.typ.(type) {
 	case *godwarf.UintType:
 		if t.Size() != 1 {
@@ -155,7 +160,7 @@ func (r region) Uint8() uint8 {
 
 // Bool returns the bool value stored in r.
 // r must have type bool.
-func (r region) Bool() bool {
+func (r *region) Bool() bool {
 	switch t := r.typ.(type) {
 	case *godwarf.BoolType:
 		i, _ := readUintRaw(r.mem, uint64(r.a), t.Size())
@@ -166,7 +171,7 @@ func (r region) Bool() bool {
 }
 
 // String returns the value of the string stored in r.
-func (r region) String() string {
+func (r *region) String() string {
 	switch t := r.typ.(type) {
 	case *godwarf.StringType:
 		ptrSize := int64(r.bi.Arch.PtrSize())
@@ -182,19 +187,19 @@ func (r region) String() string {
 
 // SliceIndex indexes a slice (a[n]). r must contain a slice.
 // n must be in bounds for the slice.
-func (r region) SliceIndex(n int64) region {
+func (r *region) SliceIndex(n int64) *region {
 	switch t := r.typ.(type) {
 	case *godwarf.SliceType:
 		ptrSize := int64(r.bi.Arch.PtrSize())
 		p, _ := readUintRaw(r.mem, uint64(r.a), ptrSize)
-		return region{mem: r.mem, bi: r.bi, a: Address(p).Add(n * t.ElemType.Size()), typ: resolveTypedef(t.ElemType)}
+		return &region{mem: r.mem, bi: r.bi, a: Address(p).Add(n * t.ElemType.Size()), typ: resolveTypedef(t.ElemType)}
 	default:
 		panic("can't index a non-slice")
 	}
 }
 
 // SliceLen returns the length of a slice. r must contain a slice.
-func (r region) SliceLen() int64 {
+func (r *region) SliceLen() int64 {
 	switch r.typ.(type) {
 	case *godwarf.SliceType:
 		ptrSize := int64(r.bi.Arch.PtrSize())
@@ -206,7 +211,7 @@ func (r region) SliceLen() int64 {
 }
 
 // SliceCap returns the capacity of a slice. r must contain a slice.
-func (r region) SliceCap() int64 {
+func (r *region) SliceCap() int64 {
 	switch r.typ.(type) {
 	case *godwarf.SliceType:
 		ptrSize := int64(r.bi.Arch.PtrSize())
@@ -219,19 +224,19 @@ func (r region) SliceCap() int64 {
 
 // Field returns the part of r which contains the field f.
 // r must contain a struct, and f must be one of its fields.
-func (r region) Field(fn string) region {
+func (r *region) Field(fn string) *region {
 	switch t := r.typ.(type) {
 	case *godwarf.StructType:
 		for _, f := range t.Field {
 			if f.Name == fn {
-				return region{mem: r.mem, bi: r.bi, a: r.a.Add(f.ByteOffset), typ: resolveTypedef(f.Type)}
+				return &region{mem: r.mem, bi: r.bi, a: r.a.Add(f.ByteOffset), typ: resolveTypedef(f.Type)}
 			}
 		}
 	}
 	panic("can't find field " + r.typ.String() + "." + fn)
 }
 
-func (r region) HasField(fn string) bool {
+func (r *region) HasField(fn string) bool {
 	switch t := r.typ.(type) {
 	case *godwarf.StructType:
 		for _, f := range t.Field {
@@ -243,7 +248,7 @@ func (r region) HasField(fn string) bool {
 	return false
 }
 
-func (r region) ArrayLen() int64 {
+func (r *region) ArrayLen() int64 {
 	switch t := r.typ.(type) {
 	case *godwarf.ArrayType:
 		return t.Count
@@ -252,24 +257,38 @@ func (r region) ArrayLen() int64 {
 	}
 }
 
-func (r region) ArrayIndex(i int64) region {
+func (r *region) ArrayIndex(i int64) *region {
 	switch t := r.typ.(type) {
 	case *godwarf.ArrayType:
 		if i < 0 || i >= t.Count {
 			panic("array index out of bounds")
 		}
-		return region{mem: r.mem, bi: r.bi, a: r.a.Add(i * t.Type.Size()), typ: resolveTypedef(t.Type)}
+		return &region{mem: r.mem, bi: r.bi, a: r.a.Add(i * t.Type.Size()), typ: resolveTypedef(t.Type)}
 	default:
 		panic("can't ArrayLen a non-array")
 	}
 }
 
-func (r region) IsStruct() bool {
+func (r *region) ArrayElemType() godwarf.Type {
+	switch t := r.typ.(type) {
+	case *godwarf.ArrayType:
+		return t.Type
+	default:
+		panic("can't ArrayElemType a non-array")
+	}
+}
+
+func (r *region) IsStruct() bool {
 	_, ok := r.typ.(*godwarf.StructType)
 	return ok
 }
 
-func (r region) IsUint16() bool {
+func (r *region) IsArray() bool {
+	_, ok := r.typ.(*godwarf.ArrayType)
+	return ok
+}
+
+func (r *region) IsUint16() bool {
 	t, ok := r.typ.(*godwarf.UintType)
 	return ok && t.Size() == 2
 }
