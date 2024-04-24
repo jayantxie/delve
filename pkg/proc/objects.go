@@ -73,9 +73,10 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 		}
 		ptr, _ := readUintRaw(s.mem, uint64(a), int64(s.bi.Arch.PtrSize()))
 		if ptr > 0 {
-			sv := s.findObject(Address(ptr), &godwarf.VoidType{CommonType: godwarf.CommonType{ByteSize: int64(0)}})
-			v.allSize += sv.allSize
-			v.allCount += sv.allCount
+			if sv := s.findObject(Address(ptr), &godwarf.VoidType{CommonType: godwarf.CommonType{ByteSize: int64(0)}}); sv != nil {
+				v.allSize += sv.allSize
+				v.allCount += sv.allCount
+			}
 		}
 	}
 	return v
