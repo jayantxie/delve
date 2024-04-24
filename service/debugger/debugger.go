@@ -1591,55 +1591,11 @@ func filterRuntimeVars(v *proc.Variable) bool {
 	return false
 }
 
-func (d *Debugger) ObjectReference() (res []*proc.Variable, err error) {
+func (d *Debugger) ObjectReference() (res []*proc.ReferenceVariable, err error) {
 	d.targetMutex.Lock()
 	defer d.targetMutex.Unlock()
-	//grs, _, err := proc.GoroutinesInfo(d.target.Selected, 0, 0)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//for _, gr := range grs {
-	//	sf, err := proc.GoroutineStacktrace(d.target.Selected, gr, 512, 0)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	for i := range sf {
-	//		if sf[i].Current.Fn != nil {
-	//			var err error
-	//			scope := proc.FrameToScope(d.target.Selected, d.target.Selected.Memory(), nil, 0, sf[i:]...)
-	//			locals, err := scope.LocalVariables(ShortLoadConfig)
-	//			if err != nil {
-	//				return nil, err
-	//			}
-	//			for _, l := range locals {
-	//				// filter runtime package
-	//				if !filterRuntimeVars(l) {
-	//					res = append(res, l)
-	//				}
-	//			}
-	//		}
-	//	}
-	//}
-	//p := d.target.Selected
-	//scope, err := proc.ThreadScope(p, p.CurrentThread())
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//pv, err := scope.PackageVariables(ShortLoadConfig)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//for i := range pv {
-	//	if !filterRuntimeVars(pv[i]) {
-	//		res = append(res, pv[i])
-	//	}
-	//}
-	d.target.Selected.ForEachObject(func(x proc.Address) bool {
-		res = append(res, &proc.Variable{Addr: uint64(x)})
-		return true
-	})
-	return res, nil
+	res, err = d.target.Selected.ObjectReference()
+	return res, err
 }
 
 // FunctionArguments returns the arguments to the current function.

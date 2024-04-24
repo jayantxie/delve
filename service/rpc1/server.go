@@ -225,7 +225,7 @@ func (s *RPCServer) ObjectReference(arg interface{}, variables *[]api.Variable) 
 	if err != nil {
 		return err
 	}
-	*variables = api.ConvertVars(vars)
+	*variables = api.ConvertRefVars(vars)
 	return nil
 }
 

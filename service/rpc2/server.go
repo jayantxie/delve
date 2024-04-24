@@ -500,7 +500,7 @@ func (s *RPCServer) ObjectReference(arg ObjectReferenceIn, out *ObjectReferenceO
 	if err != nil {
 		return err
 	}
-	out.Variables = api.ConvertVars(vars)
+	out.Variables = api.ConvertRefVars(vars)
 	return nil
 }
 
