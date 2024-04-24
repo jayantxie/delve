@@ -2215,7 +2215,7 @@ func (s *Session) onScopesRequest(request *dap.ScopesRequest) {
 		s.sendErrorResponse(request.Request, UnableToListLocals, "Unable to list locals", err.Error())
 		return
 	}
-	locScope := &fullyQualifiedVariable{&proc.Variable{Name: fmt.Sprintf("Locals%s", suffix), Children: slicePtrVarToSliceVar(append(args, locals...))}, "", true, 0}
+	locScope := &fullyQualifiedVariable{&proc.Variable{BriefVariable: proc.BriefVariable{Name: fmt.Sprintf("Locals%s", suffix)}, Children: slicePtrVarToSliceVar(append(args, locals...))}, "", true, 0}
 	scopeLocals := dap.Scope{Name: locScope.Name, VariablesReference: s.variableHandles.create(locScope)}
 	scopes := []dap.Scope{scopeLocals}
 
@@ -2247,7 +2247,9 @@ func (s *Session) onScopesRequest(request *dap.ScopesRequest) {
 		}
 
 		globScope := &fullyQualifiedVariable{&proc.Variable{
-			Name:     fmt.Sprintf("Globals (package %s)", currPkg),
+			BriefVariable: proc.BriefVariable{
+				Name: fmt.Sprintf("Globals (package %s)", currPkg),
+			},
 			Children: slicePtrVarToSliceVar(globals),
 		}, currPkg, true, 0}
 		scopeGlobals := dap.Scope{Name: globScope.Name, VariablesReference: s.variableHandles.create(globScope)}
@@ -2265,12 +2267,12 @@ func (s *Session) onScopesRequest(request *dap.ScopesRequest) {
 		regsVar := make([]proc.Variable, len(outRegs))
 		for i, r := range outRegs {
 			regsVar[i] = proc.Variable{
-				Name:  r.Name,
-				Value: constant.MakeString(r.Value),
-				Kind:  reflect.Kind(proc.VariableConstant),
+				BriefVariable: proc.BriefVariable{Name: r.Name},
+				Value:         constant.MakeString(r.Value),
+				Kind:          reflect.Kind(proc.VariableConstant),
 			}
 		}
-		regsScope := &fullyQualifiedVariable{&proc.Variable{Name: "Registers", Children: regsVar}, "", true, 0}
+		regsScope := &fullyQualifiedVariable{&proc.Variable{BriefVariable: proc.BriefVariable{Name: "Registers"}, Children: regsVar}, "", true, 0}
 		scopeRegisters := dap.Scope{Name: regsScope.Name, VariablesReference: s.variableHandles.create(regsScope)}
 		scopes = append(scopes, scopeRegisters)
 	}
