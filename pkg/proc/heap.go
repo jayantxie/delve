@@ -314,8 +314,8 @@ func (s *HeapScope) readSpans(scope *EvalScope, mheap *region, arenas []arena) {
 		spanSize := nPages * pageSize
 		max := min.Add(spanSize)
 		st := sp.Field("state")
-		if st.IsStruct() && st.HasField("special") { // go1.14+
-			st = st.Field("special")
+		if st.IsStruct() && st.HasField("s") { // go1.14+
+			st = st.Field("s")
 		}
 		if st.IsStruct() && st.HasField("value") { // go1.20+
 			st = st.Field("value")
