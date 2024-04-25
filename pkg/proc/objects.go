@@ -9,7 +9,9 @@ import (
 )
 
 type ReferenceVariable struct {
-	BriefVariable
+	Addr     uint64
+	Name     string
+	RealType godwarf.Type
 
 	Children []*ReferenceVariable
 
@@ -45,10 +47,8 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 		}
 		s.stackVisited[addr] = true
 		v = &ReferenceVariable{
-			BriefVariable: BriefVariable{
-				Addr:     uint64(addr),
-				RealType: resolveTypedef(typ),
-			},
+			Addr:     uint64(addr),
+			RealType: resolveTypedef(typ),
 		}
 		return v
 	}
@@ -62,10 +62,8 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 	}
 	h.mark |= uint64(1) << b
 	v = &ReferenceVariable{
-		BriefVariable: BriefVariable{
-			Addr:     uint64(addr),
-			RealType: resolveTypedef(typ),
-		},
+		Addr:     uint64(addr),
+		RealType: resolveTypedef(typ),
 	}
 	v.allSize += h.size
 	v.allCount += 1
@@ -90,6 +88,15 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 	return v
 }
 
+func (s *ObjRefScope) directBucketObject(addr Address, typ godwarf.Type) (v *ReferenceVariable) {
+	v = &ReferenceVariable{
+		Addr:     uint64(addr),
+		RealType: resolveTypedef(typ),
+	}
+	v.allSize += typ.Size()
+	return v
+}
+
 func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 	switch typ := x.RealType.(type) {
 	case *godwarf.PtrType:
@@ -108,7 +115,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 	case *godwarf.ChanType:
 		ptrval, _ := readUintRaw(s.mem, x.Addr, int64(s.bi.Arch.PtrSize()))
 		if ptrval != 0 {
-			if y := s.findObject(Address(ptrval), resolveTypedef(typ.Type)); y != nil {
+			if y := s.findObject(Address(ptrval), resolveTypedef(typ.Type.(*godwarf.PtrType).Type)); y != nil {
 				x.allSize += y.allSize
 				x.allCount += y.allCount
 
@@ -140,7 +147,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 	case *godwarf.MapType:
 		ptrval, _ := readUintRaw(s.mem, x.Addr, int64(s.bi.Arch.PtrSize()))
 		if ptrval != 0 {
-			if y := s.findObject(Address(ptrval), resolveTypedef(typ.Type)); y != nil {
+			if y := s.findObject(Address(ptrval), resolveTypedef(typ.Type.(*godwarf.PtrType).Type)); y != nil {
 				x.allSize += y.allSize
 				x.allCount += y.allCount
 
@@ -152,10 +159,12 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 				var idx int
 				for it.next() {
 					tmp := it.key()
-					if key := s.findObject(Address(tmp.Addr), resolveTypedef(tmp.RealType)); key != nil {
-						s.fillRefs(key)
-						x.Children = append(x.Children, key)
-						key.Name = fmt.Sprintf("key%d", idx)
+					if key := s.directBucketObject(Address(tmp.Addr), resolveTypedef(tmp.RealType)); key != nil {
+						if !isPrimitiveType(key.RealType) {
+							s.fillRefs(key)
+							x.Children = append(x.Children, key)
+							key.Name = fmt.Sprintf("key%d", idx)
+						}
 						x.allSize += key.allSize
 						x.allCount += key.allCount
 					}
@@ -164,10 +173,12 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 					} else {
 						tmp = xv.newVariable("", it.values.Addr, it.values.fieldType, s.mem)
 					}
-					if val := s.findObject(Address(tmp.Addr), resolveTypedef(tmp.RealType)); val != nil {
-						s.fillRefs(val)
-						x.Children = append(x.Children, val)
-						val.Name = fmt.Sprintf("val%d", idx)
+					if val := s.directBucketObject(Address(tmp.Addr), resolveTypedef(tmp.RealType)); val != nil {
+						if !isPrimitiveType(val.RealType) {
+							s.fillRefs(val)
+							x.Children = append(x.Children, val)
+							val.Name = fmt.Sprintf("val%d", idx)
+						}
 						x.allSize += val.allSize
 						x.allCount += val.allCount
 					}
@@ -195,7 +206,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 			}
 		}
 	case *godwarf.InterfaceType:
-		xv := &Variable{BriefVariable: x.BriefVariable, mem: s.mem}
+		xv := newVariable("", x.Addr, x.RealType, s.bi, s.mem)
 		_type, data, isnil := xv.readInterface()
 		if isnil || data == nil {
 			return
@@ -223,11 +234,9 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 				continue
 			}
 			y := &ReferenceVariable{
-				BriefVariable: BriefVariable{
-					Addr:     uint64(Address(x.Addr).Add(field.ByteOffset)),
-					Name:     field.Name,
-					RealType: resolveTypedef(field.Type),
-				},
+				Addr:     uint64(Address(x.Addr).Add(field.ByteOffset)),
+				Name:     field.Name,
+				RealType: resolveTypedef(field.Type),
 			}
 			s.fillRefs(y)
 			x.Children = append(x.Children, y)
@@ -241,11 +250,9 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 		}
 		for i := int64(0); i < typ.Count; i++ {
 			y := &ReferenceVariable{
-				BriefVariable: BriefVariable{
-					Addr:     uint64(Address(x.Addr).Add(i * eType.Size())),
-					Name:     fmt.Sprintf("[%d]", i),
-					RealType: eType,
-				},
+				Addr:     uint64(Address(x.Addr).Add(i * eType.Size())),
+				Name:     fmt.Sprintf("[%d]", i),
+				RealType: eType,
 			}
 			s.fillRefs(y)
 			x.Children = append(x.Children, y)
@@ -255,15 +262,14 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 	case *godwarf.FuncType:
 		closureAddr, _ := readUintRaw(s.mem, x.Addr, int64(s.bi.Arch.PtrSize()))
 		if closureAddr != 0 {
-			if closure := s.findObject(Address(closureAddr), typ); closure != nil {
-				funcAddr, _ := readUintRaw(s.mem, closureAddr, int64(s.bi.Arch.PtrSize()))
-				if funcAddr != 0 {
-					fn := s.bi.PCToFunc(funcAddr)
-					if fn == nil {
-						return
-					}
-					cst := fn.closureStructType(s.bi)
-					closure.RealType = cst
+			funcAddr, _ := readUintRaw(s.mem, closureAddr, int64(s.bi.Arch.PtrSize()))
+			if funcAddr != 0 {
+				fn := s.bi.PCToFunc(funcAddr)
+				if fn == nil {
+					return
+				}
+				cst := fn.closureStructType(s.bi)
+				if closure := s.findObject(Address(closureAddr), cst); closure != nil {
 					s.fillRefs(closure)
 					x.Children = closure.Children
 					x.allSize += closure.allSize
@@ -306,11 +312,9 @@ func (t *Target) ObjectReference() ([]*ReferenceVariable, error) {
 				for _, l := range locals {
 					if l.Addr != 0 {
 						root := &ReferenceVariable{
-							BriefVariable: BriefVariable{
-								Addr:     l.Addr,
-								Name:     l.Name,
-								RealType: l.RealType,
-							},
+							Addr:     l.Addr,
+							Name:     l.Name,
+							RealType: l.RealType,
 						}
 						ors.fillRefs(root)
 						allVariables = append(allVariables, root)
@@ -325,11 +329,9 @@ func (t *Target) ObjectReference() ([]*ReferenceVariable, error) {
 	for _, pv := range pvs {
 		if pv.Addr != 0 {
 			root := &ReferenceVariable{
-				BriefVariable: BriefVariable{
-					Addr:     pv.Addr,
-					Name:     pv.Name,
-					RealType: pv.RealType,
-				},
+				Addr:     pv.Addr,
+				Name:     pv.Name,
+				RealType: pv.RealType,
 			}
 			ors.fillRefs(root)
 			allVariables = append(allVariables, root)
@@ -341,11 +343,9 @@ func (t *Target) ObjectReference() ([]*ReferenceVariable, error) {
 		for _, child := range r.Children {
 			if child.Addr != 0 {
 				root := &ReferenceVariable{
-					BriefVariable: BriefVariable{
-						Addr:     child.Addr,
-						Name:     child.Name,
-						RealType: child.RealType,
-					},
+					Addr:     child.Addr,
+					Name:     child.Name,
+					RealType: child.RealType,
 				}
 				ors.fillRefs(root)
 				allVariables = append(allVariables, root)

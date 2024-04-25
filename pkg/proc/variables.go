@@ -91,20 +91,16 @@ const (
 	variableTrustLen
 )
 
-type BriefVariable struct {
-	Addr     uint64
-	Name     string
-	RealType godwarf.Type
-}
-
 // Variable represents a variable. It contains the address, name,
 // type and other information parsed from both the Dwarf information
 // and the memory of the debugged process.
 // If OnlyAddr is true, the variables value has not been loaded.
 type Variable struct {
-	BriefVariable
+	Addr      uint64
 	OnlyAddr  bool
+	Name      string
 	DwarfType godwarf.Type
+	RealType  godwarf.Type
 	Kind      reflect.Kind
 	mem       MemoryReadWriter
 	bi        *BinaryInfo
@@ -643,10 +639,8 @@ func newVariable(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInf
 	}
 
 	v := &Variable{
-		BriefVariable: BriefVariable{
-			Name: name,
-			Addr: addr,
-		},
+		Name:      name,
+		Addr:      addr,
 		DwarfType: dwarfType,
 		mem:       mem,
 		bi:        bi,
@@ -784,11 +778,9 @@ func newConstant(val constant.Value, mem MemoryReadWriter) *Variable {
 }
 
 var nilVariable = &Variable{
-	BriefVariable: BriefVariable{
-		Name: "nil",
-		Addr: 0,
-	},
-	Children: []Variable{{BriefVariable: BriefVariable{Addr: 0}, OnlyAddr: true}},
+	Name:     "nil",
+	Addr:     0,
+	Children: []Variable{{Addr: 0, OnlyAddr: true}},
 	Base:     0,
 	Kind:     reflect.Ptr,
 }
