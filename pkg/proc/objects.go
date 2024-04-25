@@ -29,11 +29,7 @@ type ObjRefScope struct {
 }
 
 // todo:
-// 1. mark allSize and allCount
-// 2. 去重
-// 3. 尽量识别所有能识别的类型
-// real type
-// 栈变量循环引用怎么办？
+// 1. 尽量识别所有能识别的类型
 func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVariable) {
 	h := s.findHeapInfo(addr)
 	if h == nil {
@@ -124,7 +120,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 					logflags.DebuggerLogger().Errorf("bad channel type %v", y.RealType.String())
 					return
 				}
-				chanLen, _ := readUintRaw(s.mem, uint64(Address(x.Addr).Add(structType.Field[1].ByteOffset)), structType.Field[1].ByteSize)
+				chanLen, _ := readUintRaw(s.mem, uint64(Address(ptrval).Add(structType.Field[1].ByteOffset)), int64(s.bi.Arch.PtrSize()))
 
 				if chanLen > 0 {
 					for _, field := range structType.Field {
@@ -145,6 +141,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 			}
 		}
 	case *godwarf.MapType:
+		// todo: optimize implementation
 		ptrval, _ := readUintRaw(s.mem, x.Addr, int64(s.bi.Arch.PtrSize()))
 		if ptrval != 0 {
 			if y := s.findObject(Address(ptrval), resolveTypedef(typ.Type.(*godwarf.PtrType).Type)); y != nil {
@@ -239,6 +236,9 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 				RealType: resolveTypedef(field.Type),
 			}
 			s.fillRefs(y)
+			if y.allCount == 0 {
+				continue
+			}
 			x.Children = append(x.Children, y)
 			x.allSize += y.allSize
 			x.allCount += y.allCount
@@ -255,6 +255,9 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 				RealType: eType,
 			}
 			s.fillRefs(y)
+			if y.allCount == 0 {
+				continue
+			}
 			x.Children = append(x.Children, y)
 			x.allSize += y.allSize
 			x.allCount += y.allCount
@@ -317,6 +320,9 @@ func (t *Target) ObjectReference() ([]*ReferenceVariable, error) {
 							RealType: l.RealType,
 						}
 						ors.fillRefs(root)
+						if root.allCount == 0 {
+							continue
+						}
 						allVariables = append(allVariables, root)
 					}
 				}
@@ -334,6 +340,9 @@ func (t *Target) ObjectReference() ([]*ReferenceVariable, error) {
 				RealType: pv.RealType,
 			}
 			ors.fillRefs(root)
+			if root.allCount == 0 {
+				continue
+			}
 			allVariables = append(allVariables, root)
 		}
 	}
@@ -348,6 +357,9 @@ func (t *Target) ObjectReference() ([]*ReferenceVariable, error) {
 					RealType: child.RealType,
 				}
 				ors.fillRefs(root)
+				if root.allCount == 0 {
+					continue
+				}
 				allVariables = append(allVariables, root)
 			}
 		}
