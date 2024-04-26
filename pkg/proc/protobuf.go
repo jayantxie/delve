@@ -262,9 +262,9 @@ func (b *profileBuilder) stringIndex(s string) int64 {
 	return int64(id)
 }
 
-func (b *profileBuilder) addReference(indexes []uint64) {
+func (b *profileBuilder) addReference(indexes []uint64, count, bytes int64) {
 	start := b.pb.startMessage()
-	b.pb.int64s(tagSample_Value, []int64{10, 1024})
+	b.pb.int64s(tagSample_Value, []int64{count, bytes})
 	b.pb.uint64s(tagSample_Location, indexes)
 	b.pb.endMessage(tagProfile_Sample, start)
 }

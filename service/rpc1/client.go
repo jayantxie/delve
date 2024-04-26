@@ -264,10 +264,11 @@ func (c *RPCClient) ListLocalVariables(scope api.EvalScope) ([]api.Variable, err
 	return vars, err
 }
 
-func (c *RPCClient) ObjectReference() ([]api.Variable, error) {
-	var vars []api.Variable
-	err := c.call("ObjectReference", nil, &vars)
-	return vars, err
+func (c *RPCClient) ObjectReference(filename string) error {
+	arg := &ObjectReferenceArgs{
+		FileName: filename,
+	}
+	return c.call("ObjectReference", arg, nil)
 }
 
 func (c *RPCClient) ListRegisters() (string, error) {

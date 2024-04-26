@@ -1591,11 +1591,11 @@ func filterRuntimeVars(v *proc.Variable) bool {
 	return false
 }
 
-func (d *Debugger) ObjectReference() (res []*proc.ReferenceVariable, err error) {
+func (d *Debugger) ObjectReference(filename string) (err error) {
 	d.targetMutex.Lock()
 	defer d.targetMutex.Unlock()
-	res, err = d.target.Selected.ObjectReference()
-	return res, err
+	err = d.target.Selected.ObjectReference(filename)
+	return err
 }
 
 // FunctionArguments returns the arguments to the current function.

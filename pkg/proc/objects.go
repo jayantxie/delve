@@ -2,18 +2,32 @@ package proc
 
 import (
 	"fmt"
+	"os"
 	"reflect"
+	"strings"
 
 	"github.com/go-delve/delve/pkg/dwarf/godwarf"
 	"github.com/go-delve/delve/pkg/logflags"
 )
+
+// TODO:
+// 1. 优化性能；
+// 2. 优化map实现；
+// 3. 优化profile展示；
+// 4. 测试dlv attach；
+// 5. 测试kitex 内存泄露；
+// 6. 测试fork进程；
+// 7. 优化代码实现；
 
 type ReferenceVariable struct {
 	Addr     uint64
 	Name     string
 	RealType godwarf.Type
 
-	Children []*ReferenceVariable
+	Index uint64
+
+	heapBase uint64
+	heapSize int64
 
 	// node size
 	size int64
@@ -25,6 +39,8 @@ type ObjRefScope struct {
 	*HeapScope
 
 	pb *profileBuilder
+
+	referenceLink []*ReferenceVariable
 
 	gr           *G
 	stackVisited map[Address]bool
@@ -50,11 +66,11 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 		}
 		return v
 	}
-	x := h.base.Add(addr.Sub(h.base) / h.size * h.size)
+	base := h.base.Add(addr.Sub(h.base) / h.size * h.size)
 	// Check if object is marked.
-	h = s.findHeapInfo(x)
+	h = s.findHeapInfo(base)
 	// Find mark bit
-	b := uint64(x) % heapInfoSize / 8
+	b := uint64(base) % heapInfoSize / 8
 	if h.mark&(uint64(1)<<b) != 0 { // already found
 		return nil
 	}
@@ -62,12 +78,13 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 	v = &ReferenceVariable{
 		Addr:     uint64(addr),
 		RealType: resolveTypedef(typ),
+		heapBase: uint64(base),
 	}
-	v.size = h.size
+	v.heapSize, v.size = h.size, h.size
 	v.count += 1
 	// mark each unknown type pointer
 	for i := int64(0); i < h.size; i += int64(s.bi.Arch.PtrSize()) {
-		a := x.Add(i)
+		a := base.Add(i)
 		// explicit traversal known type
 		if a >= addr && a < addr.Add(typ.Size()) {
 			continue
@@ -86,6 +103,11 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 	return v
 }
 
+func (v *ReferenceVariable) isValidAddr(addr Address) bool {
+	base := Address(v.heapBase)
+	return base == 0 || addr >= base && addr < base.Add(v.heapSize)
+}
+
 func (s *ObjRefScope) directBucketObject(addr Address, typ godwarf.Type) (v *ReferenceVariable) {
 	v = &ReferenceVariable{
 		Addr:     uint64(addr),
@@ -95,15 +117,37 @@ func (s *ObjRefScope) directBucketObject(addr Address, typ godwarf.Type) (v *Ref
 	return v
 }
 
-func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
+func (s *ObjRefScope) record(x *ReferenceVariable) {
+	if x.size == 0 && x.count == 0 {
+		return
+	}
+	var indexes []uint64
+	if x.Index == 0 {
+		x.Index = uint64(s.pb.stringIndex(x.Name))
+	}
+	indexes = append(indexes, x.Index)
+	for i := len(s.referenceLink) - 1; i >= 0; i-- {
+		y := s.referenceLink[i]
+		if y.Index == 0 {
+			y.Index = uint64(s.pb.stringIndex(y.Name))
+		}
+		indexes = append(indexes, y.Index)
+	}
+	s.pb.addReference(indexes, x.count, x.size)
+}
+
+func (s *ObjRefScope) fillRefs(x *ReferenceVariable, inStack bool) {
+	if inStack {
+		s.referenceLink = append(s.referenceLink, x)
+		defer func() { s.referenceLink = s.referenceLink[:len(s.referenceLink)-1] }()
+	}
 	switch typ := x.RealType.(type) {
 	case *godwarf.PtrType:
 		ptrval, _ := readUintRaw(s.mem, x.Addr, int64(s.bi.Arch.PtrSize()))
 		if ptrval != 0 {
 			if y := s.findObject(Address(ptrval), resolveTypedef(typ.Type)); y != nil {
-				s.fillRefs(y)
+				s.fillRefs(y, false)
 				// flatten reference
-				x.Children = y.Children
 				x.size += y.size
 				x.count += y.count
 			}
@@ -130,8 +174,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 							zptrval, _ := readUintRaw(s.mem, uint64(Address(y.Addr).Add(field.ByteOffset)), int64(s.bi.Arch.PtrSize()))
 							if zptrval != 0 {
 								if z := s.findObject(Address(zptrval), fakeArrayType(chanLen, typ.ElemType)); z != nil {
-									s.fillRefs(z)
-									x.Children = z.Children
+									s.fillRefs(z, false)
 									x.size += z.size
 									x.count += z.count
 								}
@@ -160,9 +203,9 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 					tmp := it.key()
 					if key := s.directBucketObject(Address(tmp.Addr), resolveTypedef(tmp.RealType)); key != nil {
 						if !isPrimitiveType(key.RealType) {
-							s.fillRefs(key)
-							x.Children = append(x.Children, key)
 							key.Name = fmt.Sprintf("key%d", idx)
+							s.fillRefs(key, true)
+							s.record(key)
 						} else {
 							x.size += key.size
 							x.count += key.count
@@ -175,9 +218,9 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 					}
 					if val := s.directBucketObject(Address(tmp.Addr), resolveTypedef(tmp.RealType)); val != nil {
 						if !isPrimitiveType(val.RealType) {
-							s.fillRefs(val)
-							x.Children = append(x.Children, val)
 							val.Name = fmt.Sprintf("val%d", idx)
+							s.fillRefs(val, true)
+							s.record(val)
 						} else {
 							x.size += val.size
 							x.count += val.count
@@ -200,8 +243,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 		if base != 0 {
 			cap_, _ := readUintRaw(s.mem, uint64(Address(x.Addr).Add(int64(s.bi.Arch.PtrSize())*2)), int64(s.bi.Arch.PtrSize()))
 			if y := s.findObject(Address(base), fakeArrayType(cap_, typ.ElemType)); y != nil {
-				s.fillRefs(y)
-				x.Children = y.Children
+				s.fillRefs(y, false)
 				x.size += y.size
 				x.count += y.count
 			}
@@ -221,8 +263,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 			ptrval, _ := readUintRaw(s.mem, data.Addr, int64(s.bi.Arch.PtrSize()))
 			if ptrval != 0 {
 				if y := s.findObject(Address(ptrval), resolveTypedef(ptrType)); y != nil {
-					s.fillRefs(y)
-					x.Children = y.Children
+					s.fillRefs(y, false)
 					x.size += y.size
 					x.count += y.count
 				}
@@ -231,19 +272,20 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 	case *godwarf.StructType:
 		// cache mem
 		for _, field := range typ.Field {
+			fieldAddr := Address(x.Addr).Add(field.ByteOffset)
+			if !x.isValidAddr(fieldAddr) {
+				break
+			}
 			if isPrimitiveType(field.Type) {
 				continue
 			}
 			y := &ReferenceVariable{
-				Addr:     uint64(Address(x.Addr).Add(field.ByteOffset)),
+				Addr:     uint64(fieldAddr),
 				Name:     field.Name,
 				RealType: resolveTypedef(field.Type),
 			}
-			s.fillRefs(y)
-			if y.count == 0 && len(y.Children) == 0 {
-				continue
-			}
-			x.Children = append(x.Children, y)
+			s.fillRefs(y, true)
+			s.record(y)
 		}
 	case *godwarf.ArrayType:
 		eType := resolveTypedef(typ.Type)
@@ -251,16 +293,17 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 			return
 		}
 		for i := int64(0); i < typ.Count; i++ {
+			elemAddr := Address(x.Addr).Add(i * eType.Size())
+			if !x.isValidAddr(elemAddr) {
+				break
+			}
 			y := &ReferenceVariable{
-				Addr:     uint64(Address(x.Addr).Add(i * eType.Size())),
+				Addr:     uint64(elemAddr),
 				Name:     fmt.Sprintf("[%d]", i),
 				RealType: eType,
 			}
-			s.fillRefs(y)
-			if y.count == 0 && len(y.Children) == 0 {
-				continue
-			}
-			x.Children = append(x.Children, y)
+			s.fillRefs(y, true)
+			s.record(y)
 		}
 	case *godwarf.FuncType:
 		closureAddr, _ := readUintRaw(s.mem, x.Addr, int64(s.bi.Arch.PtrSize()))
@@ -273,8 +316,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable) {
 				}
 				cst := fn.closureStructType(s.bi)
 				if closure := s.findObject(Address(closureAddr), cst); closure != nil {
-					s.fillRefs(closure)
-					x.Children = closure.Children
+					s.fillRefs(closure, false)
 					x.size += closure.size
 					x.count += closure.count
 				}
@@ -294,50 +336,64 @@ func isPrimitiveType(typ godwarf.Type) bool {
 	return false
 }
 
-func (t *Target) ObjectReference() ([]*ReferenceVariable, error) {
+func (t *Target) ObjectReference(filename string) error {
 	scope, err := ThreadScope(t, t.CurrentThread())
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var allVariables []*ReferenceVariable
 
 	heapScope := &HeapScope{mem: t.Memory(), bi: t.BinInfo()}
 	heapScope.readHeap(scope)
+
+	f, err := os.Create(filename)
+
+	ors := &ObjRefScope{
+		HeapScope: heapScope,
+		pb:        newProfileBuilder(f),
+	}
 
 	grs, _, _ := GoroutinesInfo(t, 0, 0)
 	for _, gr := range grs {
 		sf, _ := GoroutineStacktrace(t, gr, 512, 0)
 		if len(sf) > 0 {
-			ors := &ObjRefScope{gr: gr, HeapScope: heapScope, stackVisited: make(map[Address]bool)}
+			ors.gr = gr
+			ors.stackVisited = make(map[Address]bool)
 			for i := range sf {
 				scope, _ := ConvertEvalScope(t, gr.ID, i, 0)
 				locals, _ := scope.LocalVariables(loadSingleValue)
 				for _, l := range locals {
 					if l.Addr != 0 {
+						if strings.HasPrefix(sf[i].Current.Fn.Name, "runtime.") {
+							continue
+						}
 						root := &ReferenceVariable{
 							Addr:     l.Addr,
-							Name:     l.Name,
+							Name:     sf[i].Current.Fn.Name + "." + l.Name,
 							RealType: l.RealType,
 						}
-						ors.fillRefs(root)
-						allVariables = append(allVariables, root)
+						ors.fillRefs(root, true)
+						ors.record(root)
 					}
 				}
 			}
 		}
 	}
 
-	ors := &ObjRefScope{HeapScope: heapScope}
+	ors.gr = nil
+	ors.stackVisited = nil
 	pvs, _ := scope.PackageVariables(loadSingleValue)
 	for _, pv := range pvs {
 		if pv.Addr != 0 {
+			if strings.HasPrefix(pv.Name, "runtime.") {
+				continue
+			}
 			root := &ReferenceVariable{
 				Addr:     pv.Addr,
 				Name:     pv.Name,
 				RealType: pv.RealType,
 			}
-			ors.fillRefs(root)
-			allVariables = append(allVariables, root)
+			ors.fillRefs(root, true)
+			ors.record(root)
 		}
 	}
 
@@ -350,10 +406,12 @@ func (t *Target) ObjectReference() ([]*ReferenceVariable, error) {
 					Name:     child.Name,
 					RealType: child.RealType,
 				}
-				ors.fillRefs(root)
-				allVariables = append(allVariables, root)
+				ors.fillRefs(root, true)
+				ors.record(root)
 			}
 		}
 	}
-	return allVariables, nil
+
+	ors.pb.flush()
+	return nil
 }

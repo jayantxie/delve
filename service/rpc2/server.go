@@ -489,19 +489,14 @@ func (s *RPCServer) ListLocalVars(arg ListLocalVarsIn, out *ListLocalVarsOut) er
 	return nil
 }
 
-type ObjectReferenceIn struct{}
-
-type ObjectReferenceOut struct {
-	Variables []api.Variable
+type ObjectReferenceIn struct {
+	FileName string
 }
 
-func (s *RPCServer) ObjectReference(arg ObjectReferenceIn, out *ObjectReferenceOut) error {
-	vars, err := s.debugger.ObjectReference()
-	if err != nil {
-		return err
-	}
-	out.Variables = api.ConvertRefVars(vars)
-	return nil
+type ObjectReferenceOut struct{}
+
+func (s *RPCServer) ObjectReference(arg *ObjectReferenceIn, out *ObjectReferenceOut) error {
+	return s.debugger.ObjectReference(arg.FileName)
 }
 
 type ListFunctionArgsIn struct {

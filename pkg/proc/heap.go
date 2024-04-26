@@ -98,7 +98,8 @@ func (s *HeapScope) Size(x Address) int64 {
 // isPtrFromHeap reports whether the inferior at address a contains a pointer.
 // a must be somewhere in the heap.
 func (s *HeapScope) isPtrFromHeap(a Address) bool {
-	return s.findHeapInfo(a).IsPtr(a, int64(s.bi.Arch.PtrSize()))
+	h := s.findHeapInfo(a)
+	return h != nil && h.IsPtr(a, int64(s.bi.Arch.PtrSize()))
 }
 
 // arena is a summary of the size of components of a heapArena.

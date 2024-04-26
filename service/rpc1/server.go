@@ -220,12 +220,15 @@ func (s *RPCServer) ListLocalVars(scope api.EvalScope, variables *[]api.Variable
 	return nil
 }
 
-func (s *RPCServer) ObjectReference(arg interface{}, variables *[]api.Variable) error {
-	vars, err := s.debugger.ObjectReference()
+type ObjectReferenceArgs struct {
+	FileName string
+}
+
+func (s *RPCServer) ObjectReference(arg *ObjectReferenceArgs) error {
+	err := s.debugger.ObjectReference(arg.FileName)
 	if err != nil {
 		return err
 	}
-	*variables = api.ConvertRefVars(vars)
 	return nil
 }
 

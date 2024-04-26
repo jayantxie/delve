@@ -161,30 +161,6 @@ func convertFloatValue(v *proc.Variable, sz int) string {
 	return strconv.FormatFloat(f, 'f', -1, sz)
 }
 
-func ConvertRefVar(v *proc.ReferenceVariable) *Variable {
-	r := Variable{
-		Addr:     v.Addr,
-		Name:     v.Name,
-		RealType: PrettyTypeName(v.RealType),
-	}
-	for _, child := range v.Children {
-		r.Children = append(r.Children, *ConvertRefVar(child))
-	}
-	return &r
-}
-
-// ConvertRefVars converts from []*proc.Variable to []api.Variable.
-func ConvertRefVars(pv []*proc.ReferenceVariable) []Variable {
-	if pv == nil {
-		return nil
-	}
-	vars := make([]Variable, 0, len(pv))
-	for _, v := range pv {
-		vars = append(vars, *ConvertRefVar(v))
-	}
-	return vars
-}
-
 // ConvertVar converts from proc.Variable to api.Variable.
 func ConvertVar(v *proc.Variable) *Variable {
 	r := Variable{

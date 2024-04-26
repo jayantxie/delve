@@ -2390,11 +2390,7 @@ func locals(t *Term, ctx callContext, args string) error {
 }
 
 func objref(t *Term, ctx callContext, args string) error {
-	vars, err := t.client.ObjectReference()
-	if err != nil {
-		return err
-	}
-	return t.printFilteredVariables("objref", vars, "", api.LoadConfig{})
+	return t.client.ObjectReference(args)
 }
 
 func vars(t *Term, ctx callContext, args string) error {
