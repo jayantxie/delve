@@ -653,22 +653,21 @@ func (fn *Function) closureStructType(bi *BinaryInfo) *godwarf.StructType {
 		Kind: "struct",
 	}
 	vars := reader.Variables(dwarfTree, 0, 0, reader.VariablesNoDeclLineCheck|reader.VariablesSkipInlinedSubroutines)
+	var offset int64
 	for _, v := range vars {
-		off, ok := v.Val(godwarf.AttrGoClosureOffset).(int64)
-		if ok {
-			n, _ := v.Val(dwarf.AttrName).(string)
-			typ, err := v.Type(fn.cu.image.dwarf, fn.cu.image.index, fn.cu.image.typeCache)
-			if err == nil {
-				sz := typ.Common().ByteSize
-				st.Field = append(st.Field, &godwarf.StructField{
-					Name:       n,
-					Type:       typ,
-					ByteOffset: off,
-					ByteSize:   sz,
-					BitOffset:  off * 8,
-					BitSize:    sz * 8,
-				})
-			}
+		n, _ := v.Val(dwarf.AttrName).(string)
+		typ, err := v.Type(fn.cu.image.dwarf, fn.cu.image.index, fn.cu.image.typeCache)
+		if err == nil {
+			sz := typ.Common().ByteSize
+			st.Field = append(st.Field, &godwarf.StructField{
+				Name:       n,
+				Type:       typ,
+				ByteOffset: offset,
+				ByteSize:   sz,
+				BitOffset:  offset * 8,
+				BitSize:    sz * 8,
+			})
+			offset += typ.Size()
 		}
 	}
 
@@ -1092,7 +1091,7 @@ func (bi *BinaryInfo) LoadImageFromData(dwdata *dwarf.Data, debugFrameBytes, deb
 }
 
 func (bi *BinaryInfo) locationExpr(entry godwarf.Entry, attr dwarf.Attr, pc uint64) ([]byte, *locationExpr, error) {
-	//TODO(aarzilli): handle DW_FORM_loclistx attribute form new in DWARFv5
+	// TODO(aarzilli): handle DW_FORM_loclistx attribute form new in DWARFv5
 	a := entry.Val(attr)
 	if a == nil {
 		return nil, nil, fmt.Errorf("no location attribute %s", attr)
@@ -1876,7 +1875,6 @@ func (bi *BinaryInfo) parseDebugFramePE(image *Image, exe *pe.File, debugInfoByt
 // loadBinaryInfoMacho specifically loads information from a Mach-O binary.
 func loadBinaryInfoMacho(bi *BinaryInfo, image *Image, path string, entryPoint uint64, wg *sync.WaitGroup) error {
 	exe, err := macho.Open(path)
-
 	if err != nil {
 		return err
 	}
@@ -2849,7 +2847,7 @@ func (bi *BinaryInfo) ListPackagesBuildInfo(includeFiles bool) []*PackageBuildIn
 	m := make(map[string]*PackageBuildInfo)
 	for _, cu := range bi.Images[0].compileUnits {
 		if cu.image != bi.Images[0] || !cu.isgo || cu.lineInfo == nil {
-			//TODO(aarzilli): what's the correct thing to do for plugins?
+			// TODO(aarzilli): what's the correct thing to do for plugins?
 			continue
 		}
 

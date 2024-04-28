@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/go-delve/delve/pkg/dwarf/godwarf"
@@ -12,12 +13,22 @@ import (
 
 // TODO:
 // 1. 优化性能；
-// 2. 优化map实现；
+// 2. 优化map实现（在同一个heap object上）
 // 3. 优化profile展示；
-// 4. 测试dlv attach；
 // 5. 测试kitex 内存泄露；
 // 6. 测试fork进程；
 // 7. 优化代码实现；
+// 8. 闭包打印（闭包字段offset）
+// 9. interface类型
+// 10. 内存读取问题
+// 11. name = ""
+// DereferenceMemory（组合内存要做fallback）
+// 12. 识别尽可能多的类型
+// 13. sync.Map类型
+// 14. 使用多线程
+// 15. 忽略runtime对象
+// 16. 设置最大深度限制
+// 17.
 
 type ReferenceVariable struct {
 	Addr     uint64
@@ -44,6 +55,22 @@ type ObjRefScope struct {
 
 	gr           *G
 	stackVisited map[Address]bool
+}
+
+// for testing
+type FallbackMemory struct {
+	MemoryReadWriter
+}
+
+func (m *FallbackMemory) ReadMemory(buf []byte, addr uint64) (n int, err error) {
+	n, err = m.MemoryReadWriter.ReadMemory(buf, addr)
+	if err == nil {
+		return
+	}
+	if cmem, ok := m.MemoryReadWriter.(*compositeMemory); ok {
+		return cmem.realmem.ReadMemory(buf, addr)
+	}
+	return
 }
 
 // todo:
@@ -262,7 +289,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable, inStack bool) {
 		if ptrType, isPtr := realtyp.(*godwarf.PtrType); isPtr {
 			ptrval, _ := readUintRaw(s.mem, data.Addr, int64(s.bi.Arch.PtrSize()))
 			if ptrval != 0 {
-				if y := s.findObject(Address(ptrval), resolveTypedef(ptrType)); y != nil {
+				if y := s.findObject(Address(ptrval), resolveTypedef(ptrType.Type)); y != nil {
 					s.fillRefs(y, false)
 					x.size += y.size
 					x.count += y.count
@@ -270,6 +297,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable, inStack bool) {
 			}
 		}
 	case *godwarf.StructType:
+		typ = s.specialStructTypes(typ)
 		// cache mem
 		for _, field := range typ.Field {
 			fieldAddr := Address(x.Addr).Add(field.ByteOffset)
@@ -326,6 +354,25 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable, inStack bool) {
 	}
 }
 
+var atomicPointerRegex = regexp.MustCompile(`^sync/atomic.Pointer\[.*\]$`)
+
+func (s *ObjRefScope) specialStructTypes(st *godwarf.StructType) *godwarf.StructType {
+	switch {
+	case atomicPointerRegex.MatchString(st.StructName):
+		// v *sync.readOnly
+		nst := *st
+		nst.Field = make([]*godwarf.StructField, len(st.Field))
+		for j := range st.Field {
+			nst.Field[j] = st.Field[j]
+		}
+		nf := *nst.Field[2]
+		nf.Type = nst.Field[0].Type.(*godwarf.ArrayType).Type
+		nst.Field[2] = &nf
+		return &nst
+	}
+	return st
+}
+
 func isPrimitiveType(typ godwarf.Type) bool {
 	typ = resolveTypedef(typ)
 	switch typ.(type) {
@@ -371,6 +418,7 @@ func (t *Target) ObjectReference(filename string) error {
 							Name:     sf[i].Current.Fn.Name + "." + l.Name,
 							RealType: l.RealType,
 						}
+						ors.HeapScope.mem = &FallbackMemory{l.mem}
 						ors.fillRefs(root, true)
 						ors.record(root)
 					}
@@ -379,6 +427,7 @@ func (t *Target) ObjectReference(filename string) error {
 		}
 	}
 
+	ors.mem = t.Memory()
 	ors.gr = nil
 	ors.stackVisited = nil
 	pvs, _ := scope.PackageVariables(loadSingleValue)
@@ -387,6 +436,9 @@ func (t *Target) ObjectReference(filename string) error {
 			if strings.HasPrefix(pv.Name, "runtime.") {
 				continue
 			}
+			//if strings.Contains(pv.Name, "pollmanager") {
+			//	continue
+			//}
 			root := &ReferenceVariable{
 				Addr:     pv.Addr,
 				Name:     pv.Name,
