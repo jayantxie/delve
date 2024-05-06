@@ -5,7 +5,6 @@ import (
 	"os"
 	"reflect"
 	"regexp"
-	"strings"
 
 	"github.com/go-delve/delve/pkg/dwarf/godwarf"
 	"github.com/go-delve/delve/pkg/logflags"
@@ -39,6 +38,8 @@ type ReferenceVariable struct {
 
 	heapBase uint64
 	heapSize int64
+
+	inStack bool
 
 	// node size
 	size int64
@@ -90,6 +91,7 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 		v = &ReferenceVariable{
 			Addr:     uint64(addr),
 			RealType: resolveTypedef(typ),
+			inStack:  true,
 		}
 		return v
 	}
@@ -130,9 +132,14 @@ func (s *ObjRefScope) findObject(addr Address, typ godwarf.Type) (v *ReferenceVa
 	return v
 }
 
-func (v *ReferenceVariable) isValidAddr(addr Address) bool {
-	base := Address(v.heapBase)
-	return base == 0 || addr >= base && addr < base.Add(v.heapSize)
+func (s *ObjRefScope) isValidAddr(v *ReferenceVariable, addr Address) bool {
+	if v.inStack {
+		// stack variable
+		return uint64(addr) >= s.gr.stack.lo && uint64(addr) <= s.gr.stack.hi
+	} else {
+		base := Address(v.heapBase)
+		return addr >= base && addr < base.Add(v.heapSize)
+	}
 }
 
 func (s *ObjRefScope) directBucketObject(addr Address, typ godwarf.Type) (v *ReferenceVariable) {
@@ -301,7 +308,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable, inStack bool) {
 		// cache mem
 		for _, field := range typ.Field {
 			fieldAddr := Address(x.Addr).Add(field.ByteOffset)
-			if !x.isValidAddr(fieldAddr) {
+			if !s.isValidAddr(x, fieldAddr) {
 				break
 			}
 			if isPrimitiveType(field.Type) {
@@ -322,7 +329,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable, inStack bool) {
 		}
 		for i := int64(0); i < typ.Count; i++ {
 			elemAddr := Address(x.Addr).Add(i * eType.Size())
-			if !x.isValidAddr(elemAddr) {
+			if !s.isValidAddr(x, elemAddr) {
 				break
 			}
 			y := &ReferenceVariable{
@@ -340,6 +347,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable, inStack bool) {
 			if funcAddr != 0 {
 				fn := s.bi.PCToFunc(funcAddr)
 				if fn == nil {
+					// 要查找堆对象
 					return
 				}
 				cst := fn.closureStructType(s.bi)
@@ -410,9 +418,6 @@ func (t *Target) ObjectReference(filename string) error {
 				locals, _ := scope.LocalVariables(loadSingleValue)
 				for _, l := range locals {
 					if l.Addr != 0 {
-						if strings.HasPrefix(sf[i].Current.Fn.Name, "runtime.") {
-							continue
-						}
 						root := &ReferenceVariable{
 							Addr:     l.Addr,
 							Name:     sf[i].Current.Fn.Name + "." + l.Name,
@@ -433,9 +438,6 @@ func (t *Target) ObjectReference(filename string) error {
 	pvs, _ := scope.PackageVariables(loadSingleValue)
 	for _, pv := range pvs {
 		if pv.Addr != 0 {
-			if strings.HasPrefix(pv.Name, "runtime.") {
-				continue
-			}
 			//if strings.Contains(pv.Name, "pollmanager") {
 			//	continue
 			//}
