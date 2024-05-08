@@ -36,6 +36,8 @@ type HeapScope struct {
 
 	specials []*Variable
 
+	mds []moduleData
+
 	mem MemoryReadWriter
 	bi  *BinaryInfo
 }

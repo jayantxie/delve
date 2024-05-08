@@ -77,7 +77,9 @@ func (r *region) Deref() *region {
 	switch t := r.typ.(type) {
 	case *godwarf.PtrType:
 		ptr, _ := readUintRaw(r.mem, uint64(r.a), t.Size())
-		return &region{mem: r.mem, bi: r.bi, a: Address(ptr), typ: resolveTypedef(t.Type)}
+		re := &region{bi: r.bi, a: Address(ptr), typ: resolveTypedef(t.Type)}
+		re.mem = cacheMemory(r.mem, uint64(re.a), int(re.typ.Size()))
+		return re
 	default:
 		panic("can't deref on non-pointer: " + t.String())
 	}
@@ -192,7 +194,9 @@ func (r *region) SliceIndex(n int64) *region {
 	case *godwarf.SliceType:
 		ptrSize := int64(r.bi.Arch.PtrSize())
 		p, _ := readUintRaw(r.mem, uint64(r.a), ptrSize)
-		return &region{mem: r.mem, bi: r.bi, a: Address(p).Add(n * t.ElemType.Size()), typ: resolveTypedef(t.ElemType)}
+		re := &region{bi: r.bi, a: Address(p).Add(n * t.ElemType.Size()), typ: resolveTypedef(t.ElemType)}
+		re.mem = cacheMemory(r.mem, uint64(re.a), int(re.typ.Size()))
+		return re
 	default:
 		panic("can't index a non-slice")
 	}
@@ -229,7 +233,9 @@ func (r *region) Field(fn string) *region {
 	case *godwarf.StructType:
 		for _, f := range t.Field {
 			if f.Name == fn {
-				return &region{mem: r.mem, bi: r.bi, a: r.a.Add(f.ByteOffset), typ: resolveTypedef(f.Type)}
+				re := &region{bi: r.bi, a: r.a.Add(f.ByteOffset), typ: resolveTypedef(f.Type)}
+				re.mem = cacheMemory(r.mem, uint64(re.a), int(re.typ.Size()))
+				return re
 			}
 		}
 	}
@@ -263,7 +269,9 @@ func (r *region) ArrayIndex(i int64) *region {
 		if i < 0 || i >= t.Count {
 			panic("array index out of bounds")
 		}
-		return &region{mem: r.mem, bi: r.bi, a: r.a.Add(i * t.Type.Size()), typ: resolveTypedef(t.Type)}
+		re := &region{bi: r.bi, a: r.a.Add(i * t.Type.Size()), typ: resolveTypedef(t.Type)}
+		re.mem = cacheMemory(r.mem, uint64(re.a), int(re.typ.Size()))
+		return re
 	default:
 		panic("can't ArrayLen a non-array")
 	}

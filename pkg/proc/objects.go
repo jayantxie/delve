@@ -288,7 +288,7 @@ func (s *ObjRefScope) fillRefs(x *ReferenceVariable, inStack bool) {
 		if isnil || data == nil {
 			return
 		}
-		rtyp, _, err := runtimeTypeToDIE(_type, data.Addr)
+		rtyp, _, err := runtimeTypeToDIE(_type, data.Addr, s.mds)
 		if err != nil {
 			return
 		}
@@ -401,11 +401,20 @@ func (t *Target) ObjectReference(filename string) error {
 	heapScope.readHeap(scope)
 
 	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
 
 	ors := &ObjRefScope{
 		HeapScope: heapScope,
 		pb:        newProfileBuilder(f),
 	}
+
+	mds, err := loadModuleData(t.BinInfo(), t.Memory())
+	if err != nil {
+		return err
+	}
+	ors.mds = mds
 
 	grs, _, _ := GoroutinesInfo(t, 0, 0)
 	for _, gr := range grs {
