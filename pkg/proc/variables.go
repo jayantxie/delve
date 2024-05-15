@@ -869,7 +869,7 @@ func (v *Variable) parseG() (*G, error) {
 		v = v.maybeDereference() // +rtype g
 	}
 
-	v.mem = cacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
+	v.mem = CacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
 
 	schedVar := v.loadFieldNamed("sched") // +rtype gobuf
 	if schedVar == nil {
@@ -1377,7 +1377,7 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 		v.loadArrayValues(recurseLevel, cfg)
 
 	case reflect.Struct:
-		v.mem = cacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
+		v.mem = CacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
 		t := v.RealType.(*godwarf.StructType)
 		v.Len = int64(len(t.Field))
 		// Recursively call extractValue to grab
@@ -1481,7 +1481,7 @@ func readStringInfo(mem MemoryReadWriter, arch *Arch, addr uint64, typ *godwarf.
 	// string data structure is always two ptrs in size. Addr, followed by len
 	// http://research.swtch.com/godata
 
-	mem = cacheMemory(mem, addr, arch.PtrSize()*2)
+	mem = CacheMemory(mem, addr, arch.PtrSize()*2)
 
 	var strlen int64
 	var outaddr uint64
@@ -1580,7 +1580,7 @@ const (
 )
 
 func (v *Variable) loadSliceInfo(t *godwarf.SliceType) {
-	v.mem = cacheMemory(v.mem, v.Addr, int(t.Size()))
+	v.mem = CacheMemory(v.mem, v.Addr, int(t.Size()))
 
 	var err error
 	for _, f := range t.Field {
@@ -1701,7 +1701,7 @@ func (v *Variable) loadArrayValues(recurseLevel int, cfg LoadConfig) {
 	}
 
 	if v.stride < maxArrayStridePrefetch {
-		v.mem = cacheMemory(v.mem, v.Base, int(v.stride*count))
+		v.mem = CacheMemory(v.mem, v.Base, int(v.stride*count))
 	}
 
 	errcount := 0
@@ -2054,7 +2054,7 @@ func (v *Variable) mapIterator() *mapIterator {
 		return it
 	}
 
-	v.mem = cacheMemory(v.mem, v.Base, int(v.RealType.Size()))
+	v.mem = CacheMemory(v.mem, v.Base, int(v.RealType.Size()))
 
 	for _, f := range maptype.Field {
 		var err error
@@ -2152,7 +2152,7 @@ func (it *mapIterator) nextBucket() bool {
 		return false
 	}
 
-	it.b.mem = cacheMemory(it.b.mem, it.b.Addr, int(it.b.RealType.Size()))
+	it.b.mem = CacheMemory(it.b.mem, it.b.Addr, int(it.b.RealType.Size()))
 
 	it.tophashes = nil
 	it.keys = nil
@@ -2283,7 +2283,7 @@ func (v *Variable) readInterface() (_type, data *Variable, isnil bool) {
 	//
 	// The following code works for both runtime.iface and runtime.eface.
 
-	v.mem = cacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
+	v.mem = CacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
 
 	ityp := resolveTypedef(&v.RealType.(*godwarf.InterfaceType).TypedefType).(*godwarf.StructType)
 
@@ -2337,7 +2337,13 @@ func (v *Variable) loadInterface(recurseLevel int, loadData bool, cfg LoadConfig
 		return
 	}
 
-	typ, kind, err := runtimeTypeToDIE(_type, data.Addr)
+	mds, err := LoadModuleData(_type.bi, _type.mem)
+	if err != nil {
+		v.Unreadable = fmt.Errorf("error loading module data: %v", err)
+		return
+	}
+
+	typ, kind, err := RuntimeTypeToDIE(_type, data.Addr, mds)
 	if err != nil {
 		v.Unreadable = err
 		return
