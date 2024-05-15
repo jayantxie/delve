@@ -62,7 +62,7 @@ func CreateLoadedCachedMemory(data []byte) MemoryReadWriter {
 	return &memCache{loaded: true, cacheAddr: fakeAddressUnresolv, cache: data, mem: nil}
 }
 
-func cacheMemory(mem MemoryReadWriter, addr uint64, size int) MemoryReadWriter {
+func CacheMemory(mem MemoryReadWriter, addr uint64, size int) MemoryReadWriter {
 	if !cacheEnabled {
 		return mem
 	}

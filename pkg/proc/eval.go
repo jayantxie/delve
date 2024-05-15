@@ -132,7 +132,7 @@ func FrameToScope(t *Target, thread MemoryReadWriter, g *G, threadID int, frames
 		maxaddr = uint64(frames[0].Regs.CFA)
 	}
 	if maxaddr > minaddr && maxaddr-minaddr < maxFramePrefetchSize {
-		thread = cacheMemory(thread, minaddr, int(maxaddr-minaddr))
+		thread = CacheMemory(thread, minaddr, int(maxaddr-minaddr))
 	}
 
 	s := &EvalScope{Location: frames[0].Call, Regs: frames[0].Regs, Mem: thread, g: g, BinInfo: t.BinInfo(), target: t, frameOffset: frames[0].FrameOffset(), threadID: threadID}
@@ -669,7 +669,7 @@ func (scope *EvalScope) PackageVariables(cfg LoadConfig) ([]*Variable, error) {
 	return vars, nil
 }
 
-func (scope *EvalScope) findGlobal(pkgName, varName string) (*Variable, error) {
+func (scope *EvalScope) FindGlobal(pkgName, varName string) (*Variable, error) {
 	for _, pkgPath := range scope.BinInfo.PackageMap[pkgName] {
 		v, err := scope.findGlobalInternal(pkgPath + "." + varName)
 		if err != nil || v != nil {
@@ -1035,7 +1035,7 @@ func (stack *evalStack) executeOp() {
 			replaceName = true
 			pkgName = scope.Fn.PackageName()
 		}
-		v, err := scope.findGlobal(pkgName, op.Name)
+		v, err := scope.FindGlobal(pkgName, op.Name)
 		if err != nil {
 			stack.err = err
 			return

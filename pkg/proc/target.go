@@ -221,7 +221,7 @@ func (t *Target) IsCgo() bool {
 		return *t.iscgo
 	}
 	scope := globalScope(t, t.BinInfo(), t.BinInfo().Images[0], t.Memory())
-	iscgov, err := scope.findGlobal("runtime", "iscgo")
+	iscgov, err := scope.FindGlobal("runtime", "iscgo")
 	if err == nil {
 		iscgov.loadValue(loadFullValue)
 		if iscgov.Unreadable == nil {
@@ -333,7 +333,7 @@ func setAsyncPreemptOff(p *Target, v int64) {
 	logger := p.BinInfo().logger
 	scope := globalScope(p, p.BinInfo(), p.BinInfo().Images[0], p.Memory())
 	// +rtype -var debug anytype
-	debugv, err := scope.findGlobal("runtime", "debug")
+	debugv, err := scope.FindGlobal("runtime", "debug")
 	if err != nil {
 		logger.Warnf("could not find runtime/debug variable (or unreadable): %v", err)
 		return

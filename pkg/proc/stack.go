@@ -765,7 +765,7 @@ func (d *Defer) EvalScope(t *Target, thread Thread) (*EvalScope, error) {
 		return nil, fmt.Errorf("could not read DWARF function entry: %v", err)
 	}
 	scope.Regs.FrameBase, _, _, _ = bi.Location(e, dwarf.AttrFrameBase, scope.PC, scope.Regs, scope.Mem)
-	scope.Mem = cacheMemory(scope.Mem, uint64(scope.Regs.CFA), int(d.argSz))
+	scope.Mem = CacheMemory(scope.Mem, uint64(scope.Regs.CFA), int(d.argSz))
 
 	return scope, nil
 }
