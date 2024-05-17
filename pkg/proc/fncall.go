@@ -114,7 +114,7 @@ type callContext struct {
 
 	// stacks is a slice of known goroutine stacks used to check for
 	// inappropriate escapes
-	stacks []stack
+	stacks []Stack
 }
 
 type callInjection struct {
@@ -232,7 +232,7 @@ func (scope *EvalScope) evalCallInjectionStart(op *evalop.CallInjectionStart, st
 		return
 	}
 	thread := scope.g.Thread
-	stacklo := scope.g.stack.lo
+	stacklo := scope.g.Stack.Lo
 	if thread == nil {
 		// We are doing a nested function call and using Go 1.15, the original
 		// injection goroutine was suspended and now we are using a different
@@ -244,7 +244,7 @@ func (scope *EvalScope) evalCallInjectionStart(op *evalop.CallInjectionStart, st
 			stack.err = err
 			return
 		}
-		stacklo = g2.stack.lo
+		stacklo = g2.Stack.Lo
 	}
 	if thread == nil {
 		stack.err = errGoroutineNotRunning
@@ -532,7 +532,7 @@ func funcCallCopyOneArg(scope *EvalScope, fncall *functionCallState, actualArg *
 	if scope.callCtx.checkEscape {
 		//TODO(aarzilli): only apply the escapeCheck to leaking parameters.
 		err := allPointers(actualArg, formalArg.name, func(addr uint64, name string) error {
-			if !pointerEscapes(addr, scope.g.stack, scope.callCtx.stacks) {
+			if !pointerEscapes(addr, scope.g.Stack, scope.callCtx.stacks) {
 				return fmt.Errorf("cannot use %s as argument %s in function %s: stack object passed to escaping pointer: %s", actualArg.Name, formalArg.name, fncall.fn.Name, name)
 			}
 			return nil
@@ -737,12 +737,12 @@ func allPointers(v *Variable, name string, f func(addr uint64, name string) erro
 	return nil
 }
 
-func pointerEscapes(addr uint64, stack stack, stacks []stack) bool {
-	if addr >= stack.lo && addr < stack.hi {
+func pointerEscapes(addr uint64, stack Stack, stacks []Stack) bool {
+	if addr >= stack.Lo && addr < stack.Hi {
 		return false
 	}
 	for _, stack := range stacks {
-		if addr >= stack.lo && addr < stack.hi {
+		if addr >= stack.Lo && addr < stack.Hi {
 			return false
 		}
 	}
@@ -873,7 +873,7 @@ func funcCallStep(callScope *EvalScope, stack *evalStack, thread Thread) bool {
 		// 1.15 might be different from the original injection goroutine) so that
 		// later on we can use it to perform the escapeCheck
 		if threadg, _ := GetG(thread); threadg != nil {
-			callScope.callCtx.stacks = append(callScope.callCtx.stacks, threadg.stack)
+			callScope.callCtx.stacks = append(callScope.callCtx.stacks, threadg.Stack)
 		}
 		if bi.Arch.Name == "arm64" || bi.Arch.Name == "ppc64le" {
 			oldlr, err := readUintRaw(thread.ProcessMemory(), regs.SP(), int64(bi.Arch.PtrSize()))

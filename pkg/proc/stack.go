@@ -122,15 +122,15 @@ func goroutineStackIterator(tgt *Target, g *G, opts StacktraceOptions) (*stackIt
 		dwarfRegs := *(bi.Arch.RegistersToDwarfRegisters(so.StaticBase, regs))
 		dwarfRegs.ChangeFunc = g.Thread.SetReg
 		return newStackIterator(
-			tgt, bi, g.variable.mem,
+			tgt, bi, g.variable.Mem,
 			dwarfRegs,
-			g.stack.hi, g, opts), nil
+			g.Stack.Hi, g, opts), nil
 	}
 	so := g.variable.bi.PCToImage(g.PC)
 	return newStackIterator(
-		tgt, bi, g.variable.mem,
+		tgt, bi, g.variable.Mem,
 		bi.Arch.addrAndStackRegsToDwarfRegisters(so.StaticBase, g.PC, g.SP, g.BP, g.LR),
-		g.stack.hi, g, opts), nil
+		g.Stack.Hi, g, opts), nil
 }
 
 type StacktraceOptions uint16
@@ -252,7 +252,7 @@ func (it *stackIterator) Next() bool {
 			it.regs = *regs
 			it.top = false
 			if it.g != nil && it.g.ID != 0 {
-				it.systemstack = !(it.regs.SP() >= it.g.stack.lo && it.regs.SP() < it.g.stack.hi)
+				it.systemstack = !(it.regs.SP() >= it.g.Stack.Lo && it.regs.SP() < it.g.Stack.Hi)
 			}
 			logflags.StackLogger().Debugf("sigtramp context read")
 			return true

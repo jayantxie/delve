@@ -403,7 +403,7 @@ func (scope *EvalScope) Locals(flags localsFlags) ([]*Variable, error) {
 				} else if dictVar.Unreadable != nil {
 					logflags.DebuggerLogger().Errorf("could not load %s variable: %v", name, dictVar.Unreadable)
 				} else {
-					scope.dictAddr, err = readUintRaw(dictVar.mem, dictVar.Addr, int64(scope.BinInfo.Arch.PtrSize()))
+					scope.dictAddr, err = readUintRaw(dictVar.Mem, dictVar.Addr, int64(scope.BinInfo.Arch.PtrSize()))
 					if err != nil {
 						logflags.DebuggerLogger().Errorf("could not load %s variable: %v", name, err)
 					}
@@ -802,9 +802,9 @@ func (stack *evalStack) eval(scope *EvalScope, ops []evalop.Op) {
 	stack.scope = scope
 
 	if scope.g != nil {
-		stack.spoff = int64(scope.Regs.Uint64Val(scope.Regs.SPRegNum)) - int64(scope.g.stack.hi)
-		stack.bpoff = int64(scope.Regs.Uint64Val(scope.Regs.BPRegNum)) - int64(scope.g.stack.hi)
-		stack.fboff = scope.Regs.FrameBase - int64(scope.g.stack.hi)
+		stack.spoff = int64(scope.Regs.Uint64Val(scope.Regs.SPRegNum)) - int64(scope.g.Stack.Hi)
+		stack.bpoff = int64(scope.Regs.Uint64Val(scope.Regs.BPRegNum)) - int64(scope.g.Stack.Hi)
+		stack.fboff = scope.Regs.FrameBase - int64(scope.g.Stack.Hi)
 	}
 
 	if scope.g != nil && scope.g.Thread != nil {
@@ -840,10 +840,10 @@ func (stack *evalStack) resume(g *G) {
 	scope.Regs.AddReg(scope.Regs.PCRegNum, pcreg)
 	scope.Regs.AddReg(scope.Regs.BPRegNum, bpreg)
 	scope.Regs.AddReg(scope.Regs.SPRegNum, spreg)
-	scope.Regs.Reg(scope.Regs.SPRegNum).Uint64Val = uint64(stack.spoff + int64(scope.g.stack.hi))
-	scope.Regs.Reg(scope.Regs.BPRegNum).Uint64Val = uint64(stack.bpoff + int64(scope.g.stack.hi))
-	scope.Regs.FrameBase = stack.fboff + int64(scope.g.stack.hi)
-	scope.Regs.CFA = scope.frameOffset + int64(scope.g.stack.hi)
+	scope.Regs.Reg(scope.Regs.SPRegNum).Uint64Val = uint64(stack.spoff + int64(scope.g.Stack.Hi))
+	scope.Regs.Reg(scope.Regs.BPRegNum).Uint64Val = uint64(stack.bpoff + int64(scope.g.Stack.Hi))
+	scope.Regs.FrameBase = stack.fboff + int64(scope.g.Stack.Hi)
+	scope.Regs.CFA = scope.frameOffset + int64(scope.g.Stack.Hi)
 	stack.curthread = g.Thread
 
 	finished := funcCallStep(scope, stack, g.Thread)
@@ -1202,7 +1202,7 @@ func (scope *EvalScope) evalTypeCast(op *evalop.TypeCast, stack *evalStack) {
 	if typeCastCompatibleTypes(argv.RealType, typ) {
 		if ptyp, isptr := typ.(*godwarf.PtrType); argv.Kind == reflect.Ptr && argv.loaded && len(argv.Children) > 0 && isptr {
 			cv := argv.Children[0]
-			argv.Children[0] = *newVariable(cv.Name, cv.Addr, ptyp.Type, cv.bi, cv.mem)
+			argv.Children[0] = *newVariable(cv.Name, cv.Addr, ptyp.Type, cv.bi, cv.Mem)
 			argv.Children[0].OnlyAddr = true
 		}
 		argv.RealType = typ
@@ -1351,7 +1351,7 @@ func (scope *EvalScope) evalTypeCast(op *evalop.TypeCast, stack *evalStack) {
 				return
 			}
 			for i, ch := range []byte(constant.StringVal(argv.Value)) {
-				e := newVariable("", argv.Addr+uint64(i), typ.(*godwarf.SliceType).ElemType, scope.BinInfo, argv.mem)
+				e := newVariable("", argv.Addr+uint64(i), typ.(*godwarf.SliceType).ElemType, scope.BinInfo, argv.Mem)
 				e.loaded = true
 				e.Value = constant.MakeInt64(int64(ch))
 				v.Children = append(v.Children, *e)
@@ -1373,7 +1373,7 @@ func (scope *EvalScope) evalTypeCast(op *evalop.TypeCast, stack *evalStack) {
 				return
 			}
 			for i, ch := range constant.StringVal(argv.Value) {
-				e := newVariable("", argv.Addr+uint64(i), typ.(*godwarf.SliceType).ElemType, scope.BinInfo, argv.mem)
+				e := newVariable("", argv.Addr+uint64(i), typ.(*godwarf.SliceType).ElemType, scope.BinInfo, argv.Mem)
 				e.loaded = true
 				e.Value = constant.MakeInt64(int64(ch))
 				v.Children = append(v.Children, *e)
@@ -1573,18 +1573,18 @@ func capBuiltin(args []*Variable, nodeargs []ast.Expr) (*Variable, error) {
 		}
 		fallthrough
 	case reflect.Array:
-		return newConstant(constant.MakeInt64(arg.Len), arg.mem), nil
+		return newConstant(constant.MakeInt64(arg.Len), arg.Mem), nil
 	case reflect.Slice:
-		return newConstant(constant.MakeInt64(arg.Cap), arg.mem), nil
+		return newConstant(constant.MakeInt64(arg.Cap), arg.Mem), nil
 	case reflect.Chan:
 		arg.loadValue(loadFullValue)
 		if arg.Unreadable != nil {
 			return nil, arg.Unreadable
 		}
 		if arg.Base == 0 {
-			return newConstant(constant.MakeInt64(0), arg.mem), nil
+			return newConstant(constant.MakeInt64(0), arg.Mem), nil
 		}
-		return newConstant(arg.Children[1].Value, arg.mem), nil
+		return newConstant(arg.Children[1].Value, arg.Mem), nil
 	default:
 		return nil, invalidArgErr
 	}
@@ -1608,25 +1608,25 @@ func lenBuiltin(args []*Variable, nodeargs []ast.Expr) (*Variable, error) {
 		if arg.Unreadable != nil {
 			return nil, arg.Unreadable
 		}
-		return newConstant(constant.MakeInt64(arg.Len), arg.mem), nil
+		return newConstant(constant.MakeInt64(arg.Len), arg.Mem), nil
 	case reflect.Chan:
 		arg.loadValue(loadFullValue)
 		if arg.Unreadable != nil {
 			return nil, arg.Unreadable
 		}
 		if arg.Base == 0 {
-			return newConstant(constant.MakeInt64(0), arg.mem), nil
+			return newConstant(constant.MakeInt64(0), arg.Mem), nil
 		}
-		return newConstant(arg.Children[0].Value, arg.mem), nil
+		return newConstant(arg.Children[0].Value, arg.Mem), nil
 	case reflect.Map:
 		it := arg.mapIterator()
 		if arg.Unreadable != nil {
 			return nil, arg.Unreadable
 		}
 		if it == nil {
-			return newConstant(constant.MakeInt64(0), arg.mem), nil
+			return newConstant(constant.MakeInt64(0), arg.Mem), nil
 		}
-		return newConstant(constant.MakeInt64(arg.Len), arg.mem), nil
+		return newConstant(constant.MakeInt64(arg.Len), arg.Mem), nil
 	default:
 		return nil, invalidArgErr
 	}
@@ -1697,7 +1697,7 @@ func imagBuiltin(args []*Variable, nodeargs []ast.Expr) (*Variable, error) {
 		return nil, fmt.Errorf("invalid argument %s (type %s) to imag", exprToString(nodeargs[0]), arg.TypeString())
 	}
 
-	return newConstant(constant.Imag(arg.Value), arg.mem), nil
+	return newConstant(constant.Imag(arg.Value), arg.Mem), nil
 }
 
 func realBuiltin(args []*Variable, nodeargs []ast.Expr) (*Variable, error) {
@@ -1716,7 +1716,7 @@ func realBuiltin(args []*Variable, nodeargs []ast.Expr) (*Variable, error) {
 		return nil, fmt.Errorf("invalid argument %s (type %s) to real", exprToString(nodeargs[0]), arg.TypeString())
 	}
 
-	return newConstant(constant.Real(arg.Value), arg.mem), nil
+	return newConstant(constant.Real(arg.Value), arg.Mem), nil
 }
 
 func minBuiltin(args []*Variable, nodeargs []ast.Expr) (*Variable, error) {
@@ -2001,7 +2001,7 @@ func (v *Variable) pointerToVariable() *Variable {
 	v.OnlyAddr = true
 
 	typename := "*" + v.DwarfType.Common().Name
-	rv := v.newVariable("", 0, &godwarf.PtrType{CommonType: godwarf.CommonType{ByteSize: int64(v.bi.Arch.PtrSize()), Name: typename}, Type: v.DwarfType}, v.mem)
+	rv := v.newVariable("", 0, &godwarf.PtrType{CommonType: godwarf.CommonType{ByteSize: int64(v.bi.Arch.PtrSize()), Name: typename}, Type: v.DwarfType}, v.Mem)
 	rv.Children = []Variable{*v}
 	rv.loaded = true
 
@@ -2072,7 +2072,7 @@ func (scope *EvalScope) evalUnary(op *evalop.Unary, stack *evalStack) {
 		stack.push(r)
 		return
 	}
-	stack.push(newConstant(rc, xv.mem))
+	stack.push(newConstant(rc, xv.Mem))
 }
 
 func negotiateType(op token.Token, xv, yv *Variable) (godwarf.Type, error) {
@@ -2188,7 +2188,7 @@ func (scope *EvalScope) evalBinary(binop *evalop.Binary, stack *evalStack) {
 			stack.err = err
 			return
 		}
-		stack.push(newConstant(constant.MakeBool(v), xv.mem))
+		stack.push(newConstant(constant.MakeBool(v), xv.Mem))
 
 	default:
 		if xv.Kind == reflect.String {
@@ -2214,7 +2214,7 @@ func (scope *EvalScope) evalBinary(binop *evalop.Binary, stack *evalStack) {
 		}
 
 		if typ == nil {
-			stack.push(newConstant(rc, xv.mem))
+			stack.push(newConstant(rc, xv.Mem))
 			return
 		}
 
@@ -2500,7 +2500,7 @@ func (v *Variable) sliceAccess(idx int) (*Variable, error) {
 			if idx >= len(s) {
 				return nil, fmt.Errorf("index out of bounds")
 			}
-			r := v.newVariable("", v.Base+uint64(int64(idx)*v.stride), v.fieldType, v.mem)
+			r := v.newVariable("", v.Base+uint64(int64(idx)*v.stride), v.fieldType, v.Mem)
 			r.loaded = true
 			r.Value = constant.MakeInt64(int64(s[idx]))
 			return r, nil
@@ -2511,7 +2511,7 @@ func (v *Variable) sliceAccess(idx int) (*Variable, error) {
 			return &v.Children[idx], nil
 		}
 	}
-	mem := v.mem
+	mem := v.Mem
 	if v.Kind != reflect.Array {
 		mem = DereferenceMemory(mem)
 	}
@@ -2613,7 +2613,7 @@ func (v *Variable) reslice(low int64, high int64, trustLen bool) (*Variable, err
 		typ = godwarf.FakeSliceType(v.fieldType)
 	}
 
-	mem := v.mem
+	mem := v.Mem
 	if v.Kind != reflect.Array {
 		mem = DereferenceMemory(mem)
 	}
@@ -2673,7 +2673,7 @@ func (v *Variable) findMethod(mname string) (*Variable, error) {
 		//TODO(aarzilli): support generic functions?
 
 		if fns := v.bi.LookupFunc()[fmt.Sprintf("%s.%s.%s", pkg, receiver, mname)]; len(fns) == 1 {
-			r, err := functionToVariable(fns[0], v.bi, v.mem)
+			r, err := functionToVariable(fns[0], v.bi, v.Mem)
 			if err != nil {
 				return nil, err
 			}
@@ -2686,7 +2686,7 @@ func (v *Variable) findMethod(mname string) (*Variable, error) {
 		}
 
 		if fns := v.bi.LookupFunc()[fmt.Sprintf("%s.(*%s).%s", pkg, receiver, mname)]; len(fns) == 1 {
-			r, err := functionToVariable(fns[0], v.bi, v.mem)
+			r, err := functionToVariable(fns[0], v.bi, v.Mem)
 			if err != nil {
 				return nil, err
 			}

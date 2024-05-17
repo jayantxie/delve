@@ -630,7 +630,7 @@ func (t *Target) SetWatchpoint(logicalID int, scope *EvalScope, expr string, wty
 		return nil, fmt.Errorf("can not watch variable of type %s", xv.DwarfType.String())
 	}
 
-	stackWatch := scope.g != nil && !scope.g.SystemStack && xv.Addr >= scope.g.stack.lo && xv.Addr < scope.g.stack.hi
+	stackWatch := scope.g != nil && !scope.g.SystemStack && xv.Addr >= scope.g.Stack.Lo && xv.Addr < scope.g.Stack.Hi
 
 	if stackWatch && wtype&WatchRead != 0 {
 		// In theory this would work except for the fact that the runtime will
@@ -646,7 +646,7 @@ func (t *Target) SetWatchpoint(logicalID int, scope *EvalScope, expr string, wty
 	bp.WatchExpr = expr
 
 	if stackWatch {
-		bp.watchStackOff = int64(bp.Addr) - int64(scope.g.stack.hi)
+		bp.watchStackOff = int64(bp.Addr) - int64(scope.g.Stack.Hi)
 		err := t.setStackWatchBreakpoints(scope, bp)
 		if err != nil {
 			return bp, err
@@ -948,8 +948,8 @@ func (rbpi *returnBreakpointInfo) Collect(t *Target, thread Thread) []*Variable 
 		return nil
 	}
 
-	oldFrameOffset := rbpi.frameOffset + int64(g.stack.hi)
-	oldSP := uint64(rbpi.spOffset + int64(g.stack.hi))
+	oldFrameOffset := rbpi.frameOffset + int64(g.Stack.Hi)
+	oldSP := uint64(rbpi.spOffset + int64(g.Stack.Hi))
 	err = fakeFunctionEntryScope(scope, rbpi.fn, oldFrameOffset, oldSP)
 	if err != nil {
 		return returnInfoError("could not read function entry", err, thread.ProcessMemory())

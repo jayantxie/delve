@@ -170,7 +170,7 @@ func adjustStackWatchpoint(t *Target, th Thread, watchpoint *Breakpoint) {
 		return
 	}
 	delete(t.Breakpoints().M, watchpoint.Addr)
-	watchpoint.Addr = uint64(int64(g.stack.hi) + watchpoint.watchStackOff)
+	watchpoint.Addr = uint64(int64(g.Stack.Hi) + watchpoint.watchStackOff)
 	err = t.proc.WriteBreakpoint(watchpoint)
 	if err != nil {
 		log := logflags.DebuggerLogger()

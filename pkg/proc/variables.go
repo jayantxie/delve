@@ -102,7 +102,7 @@ type Variable struct {
 	DwarfType godwarf.Type
 	RealType  godwarf.Type
 	Kind      reflect.Kind
-	mem       MemoryReadWriter
+	Mem       MemoryReadWriter
 	bi        *BinaryInfo
 
 	Value        constant.Value
@@ -211,7 +211,7 @@ type G struct {
 	GoPC    uint64 // PC of 'go' statement that created this goroutine.
 	StartPC uint64 // PC of the first function run on this goroutine.
 	Status  uint64
-	stack   stack // value of stack
+	Stack   Stack // value of Stack
 
 	WaitSince  int64
 	WaitReason int64
@@ -231,9 +231,9 @@ type G struct {
 	labels *map[string]string // G's pprof labels, computed on demand in Labels() method
 }
 
-// stack represents a stack span in the target process.
-type stack struct {
-	hi, lo uint64
+// Stack represents a stack span in the target process.
+type Stack struct {
+	Hi, Lo uint64
 }
 
 // GetG returns information on the G (goroutine) that is executing on this thread.
@@ -566,7 +566,7 @@ func (g *G) Labels() map[string]string {
 		if address := labelsVar.Children[0]; address.Addr != 0 {
 			labelMapType, _ := g.variable.bi.findType("runtime/pprof.labelMap")
 			if labelMapType != nil {
-				labelMap := newVariable("", address.Addr, labelMapType, g.variable.bi, g.variable.mem)
+				labelMap := newVariable("", address.Addr, labelMapType, g.variable.bi, g.variable.Mem)
 				labelMap.loadValue(loadFullValue)
 				labels = map[string]string{}
 				for i := range labelMap.Children {
@@ -640,7 +640,7 @@ func newVariable(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInf
 		Name:      name,
 		Addr:      addr,
 		DwarfType: dwarfType,
-		mem:       mem,
+		Mem:       mem,
 		bi:        bi,
 	}
 
@@ -660,7 +660,7 @@ func newVariable(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInf
 				v.Kind = reflect.String
 			}
 			if v.Addr != 0 {
-				v.Base, v.Unreadable = readUintRaw(v.mem, v.Addr, int64(v.bi.Arch.PtrSize()))
+				v.Base, v.Unreadable = readUintRaw(v.Mem, v.Addr, int64(v.bi.Arch.PtrSize()))
 			}
 		}
 	case *godwarf.ChanType:
@@ -675,7 +675,7 @@ func newVariable(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInf
 		v.stride = 1
 		v.fieldType = &godwarf.UintType{BasicType: godwarf.BasicType{CommonType: godwarf.CommonType{ByteSize: 1, Name: "byte", ReflectKind: reflect.Uint8}, BitSize: 8, BitOffset: 0}}
 		if v.Addr != 0 {
-			v.Base, v.Len, v.Unreadable = readStringInfo(v.mem, v.bi.Arch, v.Addr, t)
+			v.Base, v.Len, v.Unreadable = readStringInfo(v.Mem, v.bi.Arch, v.Addr, t)
 		}
 	case *godwarf.SliceType:
 		v.Kind = reflect.Slice
@@ -754,7 +754,7 @@ func resolveTypedef(typ godwarf.Type) godwarf.Type {
 var constantMaxInt64 = constant.MakeInt64(1<<63 - 1)
 
 func newConstant(val constant.Value, mem MemoryReadWriter) *Variable {
-	v := &Variable{Value: val, mem: mem, loaded: true}
+	v := &Variable{Value: val, Mem: mem, loaded: true}
 	switch val.Kind() {
 	case constant.Int:
 		v.Kind = reflect.Int
@@ -827,7 +827,7 @@ func (v *Variable) toField(field *godwarf.StructField) (*Variable, error) {
 			name = fmt.Sprintf("%s.%s", v.Name, field.Name)
 		}
 	}
-	return v.newVariable(name, uint64(int64(v.Addr)+field.ByteOffset), field.Type, v.mem), nil
+	return v.newVariable(name, uint64(int64(v.Addr)+field.ByteOffset), field.Type, v.Mem), nil
 }
 
 // ErrNoGoroutine returned when a G could not be found
@@ -843,7 +843,7 @@ func (ng ErrNoGoroutine) Error() string {
 var ErrUnreadableG = errors.New("could not read G struct")
 
 func (v *Variable) parseG() (*G, error) {
-	mem := v.mem
+	mem := v.Mem
 	gaddr := v.Addr
 	_, deref := v.RealType.(*godwarf.PtrType)
 
@@ -869,7 +869,7 @@ func (v *Variable) parseG() (*G, error) {
 		v = v.maybeDereference() // +rtype g
 	}
 
-	v.mem = CacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
+	v.Mem = CacheMemory(v.Mem, v.Addr, int(v.RealType.Size()))
 
 	schedVar := v.loadFieldNamed("sched") // +rtype gobuf
 	if schedVar == nil {
@@ -967,7 +967,7 @@ func (v *Variable) parseG() (*G, error) {
 		WaitReason: waitReason,
 		CurrentLoc: Location{PC: uint64(pc), File: f, Line: l, Fn: fn},
 		variable:   v,
-		stack:      stack{hi: stackhi, lo: stacklo},
+		Stack:      Stack{Hi: stackhi, Lo: stacklo},
 	}
 	return g, nil
 }
@@ -1239,8 +1239,8 @@ func (v *Variable) maybeDereference() *Variable {
 			// fake pointer variable constructed by casting an integer to a pointer type
 			return &v.Children[0]
 		}
-		ptrval, err := readUintRaw(v.mem, v.Addr, t.ByteSize)
-		r := v.newVariable("", ptrval, t.Type, DereferenceMemory(v.mem))
+		ptrval, err := readUintRaw(v.Mem, v.Addr, t.ByteSize)
+		r := v.newVariable("", ptrval, t.Type, DereferenceMemory(v.Mem))
 		if err != nil {
 			r.Unreadable = err
 		}
@@ -1265,9 +1265,9 @@ func (v *Variable) loadPtr() {
 
 	var child *Variable
 	if v.Unreadable == nil {
-		ptrval, err := readUintRaw(v.mem, v.Addr, t.ByteSize)
+		ptrval, err := readUintRaw(v.Mem, v.Addr, t.ByteSize)
 		if err == nil {
-			child = v.newVariable("", ptrval, t.Type, DereferenceMemory(v.mem))
+			child = v.newVariable("", ptrval, t.Type, DereferenceMemory(v.Mem))
 		} else {
 			// We failed to read the pointer value; mark v as unreadable.
 			v.Unreadable = err
@@ -1277,7 +1277,7 @@ func (v *Variable) loadPtr() {
 	if v.Unreadable != nil {
 		// Pointers get a child even if their value can't be read, to
 		// maintain backwards compatibility.
-		child = v.newVariable("", 0 /* addr */, t.Type, DereferenceMemory(v.mem))
+		child = v.newVariable("", 0 /* addr */, t.Type, DereferenceMemory(v.Mem))
 		child.Unreadable = fmt.Errorf("parent pointer unreadable: %w", v.Unreadable)
 	}
 
@@ -1350,7 +1350,7 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 		switch {
 		case v.Flags&VariableCPtr != 0:
 			var done bool
-			val, done, v.Unreadable = readCStringValue(DereferenceMemory(v.mem), v.Base, cfg)
+			val, done, v.Unreadable = readCStringValue(DereferenceMemory(v.Mem), v.Base, cfg)
 			if v.Unreadable == nil {
 				v.Len = int64(len(val))
 				if !done {
@@ -1369,7 +1369,7 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 			}
 
 		default:
-			val, v.Unreadable = readStringValue(DereferenceMemory(v.mem), v.Base, v.Len, cfg)
+			val, v.Unreadable = readStringValue(DereferenceMemory(v.Mem), v.Base, v.Len, cfg)
 		}
 		v.Value = constant.MakeString(val)
 
@@ -1377,7 +1377,7 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 		v.loadArrayValues(recurseLevel, cfg)
 
 	case reflect.Struct:
-		v.mem = CacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
+		v.Mem = CacheMemory(v.Mem, v.Addr, int(v.RealType.Size()))
 		t := v.RealType.(*godwarf.StructType)
 		v.Len = int64(len(t.Field))
 		// Recursively call extractValue to grab
@@ -1412,19 +1412,19 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 		v.readComplex(v.RealType.(*godwarf.ComplexType).ByteSize)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		var val int64
-		val, v.Unreadable = readIntRaw(v.mem, v.Addr, v.RealType.(*godwarf.IntType).ByteSize)
+		val, v.Unreadable = readIntRaw(v.Mem, v.Addr, v.RealType.(*godwarf.IntType).ByteSize)
 		v.Value = constant.MakeInt64(val)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		if v.Flags&VariableCPURegister != 0 {
 			v.Value = constant.MakeUint64(v.reg.Uint64Val)
 		} else {
 			var val uint64
-			val, v.Unreadable = readUintRaw(v.mem, v.Addr, v.RealType.(*godwarf.UintType).ByteSize)
+			val, v.Unreadable = readUintRaw(v.Mem, v.Addr, v.RealType.(*godwarf.UintType).ByteSize)
 			v.Value = constant.MakeUint64(val)
 		}
 	case reflect.Bool:
 		val := make([]byte, 1)
-		_, err := v.mem.ReadMemory(val, v.Addr)
+		_, err := v.Mem.ReadMemory(val, v.Addr)
 		v.Unreadable = err
 		if err == nil {
 			v.Value = constant.MakeBool(val[0] != 0)
@@ -1467,7 +1467,7 @@ func convertToEface(srcv, dstv *Variable) error {
 		dstv.writeEmptyInterface(_type.Addr, data)
 		return nil
 	}
-	typeAddr, typeKind, runtimeTypeFound, err := dwarfToRuntimeType(srcv.bi, srcv.mem, srcv.RealType)
+	typeAddr, typeKind, runtimeTypeFound, err := dwarfToRuntimeType(srcv.bi, srcv.Mem, srcv.RealType)
 	if err != nil {
 		return err
 	}
@@ -1580,14 +1580,14 @@ const (
 )
 
 func (v *Variable) loadSliceInfo(t *godwarf.SliceType) {
-	v.mem = CacheMemory(v.mem, v.Addr, int(t.Size()))
+	v.Mem = CacheMemory(v.Mem, v.Addr, int(t.Size()))
 
 	var err error
 	for _, f := range t.Field {
 		switch f.Name {
 		case sliceArrayFieldName:
 			var base uint64
-			base, err = readUintRaw(v.mem, uint64(int64(v.Addr)+f.ByteOffset), f.Type.Size())
+			base, err = readUintRaw(v.Mem, uint64(int64(v.Addr)+f.ByteOffset), f.Type.Size())
 			if err == nil {
 				v.Base = base
 				// Dereference array type to get value type
@@ -1701,12 +1701,12 @@ func (v *Variable) loadArrayValues(recurseLevel int, cfg LoadConfig) {
 	}
 
 	if v.stride < maxArrayStridePrefetch {
-		v.mem = CacheMemory(v.mem, v.Base, int(v.stride*count))
+		v.Mem = CacheMemory(v.Mem, v.Base, int(v.stride*count))
 	}
 
 	errcount := 0
 
-	mem := v.mem
+	mem := v.Mem
 	if v.Kind != reflect.Array {
 		mem = DereferenceMemory(mem)
 	}
@@ -1740,8 +1740,8 @@ func (v *Variable) readComplex(size int64) {
 
 	ftyp := godwarf.FakeBasicType("float", int(fs*8))
 
-	realvar := v.newVariable("real", v.Addr, ftyp, v.mem)
-	imagvar := v.newVariable("imaginary", v.Addr+uint64(fs), ftyp, v.mem)
+	realvar := v.newVariable("real", v.Addr, ftyp, v.Mem)
+	imagvar := v.newVariable("imaginary", v.Addr+uint64(fs), ftyp, v.Mem)
 	realvar.loadValue(loadSingleValue)
 	imagvar.loadValue(loadSingleValue)
 	v.Value = constant.BinaryOp(realvar.Value, token.ADD, constant.MakeImag(imagvar.Value))
@@ -1794,7 +1794,7 @@ func (v *Variable) writeUint(value uint64, size int64) error {
 		binary.LittleEndian.PutUint64(val, value)
 	}
 
-	_, err := v.mem.WriteMemory(v.Addr, val)
+	_, err := v.Mem.WriteMemory(v.Addr, val)
 	return err
 }
 
@@ -1823,7 +1823,7 @@ func readUintRaw(mem MemoryReadWriter, addr uint64, size int64) (uint64, error) 
 
 func (v *Variable) readFloatRaw(size int64) (float64, error) {
 	val := make([]byte, int(size))
-	_, err := v.mem.ReadMemory(val, v.Addr)
+	_, err := v.Mem.ReadMemory(val, v.Addr)
 	if err != nil {
 		return 0.0, err
 	}
@@ -1855,20 +1855,20 @@ func (v *Variable) writeFloatRaw(f float64, size int64) error {
 		binary.Write(buf, binary.LittleEndian, n)
 	}
 
-	_, err := v.mem.WriteMemory(v.Addr, buf.Bytes())
+	_, err := v.Mem.WriteMemory(v.Addr, buf.Bytes())
 	return err
 }
 
 func (v *Variable) writeBool(value bool) error {
 	val := []byte{0}
 	val[0] = *(*byte)(unsafe.Pointer(&value))
-	_, err := v.mem.WriteMemory(v.Addr, val)
+	_, err := v.Mem.WriteMemory(v.Addr, val)
 	return err
 }
 
 func (v *Variable) writeZero() error {
 	val := make([]byte, v.RealType.Size())
-	_, err := v.mem.WriteMemory(v.Addr, val)
+	_, err := v.Mem.WriteMemory(v.Addr, val)
 	return err
 }
 
@@ -1907,18 +1907,18 @@ func (v *Variable) writeSlice(len, cap int64, base uint64) error {
 }
 
 func (v *Variable) writeString(len, base uint64) error {
-	writePointer(v.bi, v.mem, v.Addr, base)
-	writePointer(v.bi, v.mem, v.Addr+uint64(v.bi.Arch.PtrSize()), len)
+	writePointer(v.bi, v.Mem, v.Addr, base)
+	writePointer(v.bi, v.Mem, v.Addr+uint64(v.bi.Arch.PtrSize()), len)
 	return nil
 }
 
 func (v *Variable) writeCopy(srcv *Variable) error {
 	buf := make([]byte, srcv.RealType.Size())
-	_, err := srcv.mem.ReadMemory(buf, srcv.Addr)
+	_, err := srcv.Mem.ReadMemory(buf, srcv.Addr)
 	if err != nil {
 		return err
 	}
-	_, err = v.mem.WriteMemory(v.Addr, buf)
+	_, err = v.Mem.WriteMemory(v.Addr, buf)
 	return err
 }
 
@@ -1934,7 +1934,7 @@ func (v *Variable) loadFunctionPtr(recurseLevel int, cfg LoadConfig) {
 		return
 	}
 
-	val, err := readUintRaw(v.mem, v.closureAddr, int64(v.bi.Arch.PtrSize()))
+	val, err := readUintRaw(v.Mem, v.closureAddr, int64(v.bi.Arch.PtrSize()))
 	if err != nil {
 		v.Unreadable = err
 		return
@@ -1952,7 +1952,7 @@ func (v *Variable) loadFunctionPtr(recurseLevel int, cfg LoadConfig) {
 	v.Len = int64(len(cst.Field))
 
 	if recurseLevel <= cfg.MaxVariableRecurse {
-		v2 := v.newVariable("", v.closureAddr, cst, v.mem)
+		v2 := v.newVariable("", v.closureAddr, cst, v.Mem)
 		v2.loadValueInternal(recurseLevel, cfg)
 		v.Children = v2.Children
 	}
@@ -1960,7 +1960,7 @@ func (v *Variable) loadFunctionPtr(recurseLevel int, cfg LoadConfig) {
 
 // funcvalAddr reads the address of the funcval contained in a function variable.
 func (v *Variable) funcvalAddr() uint64 {
-	val, err := readUintRaw(v.mem, v.Addr, int64(v.bi.Arch.PtrSize()))
+	val, err := readUintRaw(v.Mem, v.Addr, int64(v.bi.Arch.PtrSize()))
 	if err != nil {
 		v.Unreadable = err
 		return 0
@@ -1994,7 +1994,7 @@ func (v *Variable) loadMap(recurseLevel int, cfg LoadConfig) {
 		if it.values.fieldType.Size() > 0 {
 			val = it.value()
 		} else {
-			val = v.newVariable("", it.values.Addr, it.values.fieldType, DereferenceMemory(v.mem))
+			val = v.newVariable("", it.values.Addr, it.values.fieldType, DereferenceMemory(v.Mem))
 		}
 		key.loadValueInternal(recurseLevel+1, cfg)
 		val.loadValueInternal(recurseLevel+1, cfg)
@@ -2054,7 +2054,7 @@ func (v *Variable) mapIterator() *mapIterator {
 		return it
 	}
 
-	v.mem = CacheMemory(v.mem, v.Base, int(v.RealType.Size()))
+	v.Mem = CacheMemory(v.Mem, v.Base, int(v.RealType.Size()))
 
 	for _, f := range maptype.Field {
 		var err error
@@ -2152,7 +2152,7 @@ func (it *mapIterator) nextBucket() bool {
 		return false
 	}
 
-	it.b.mem = CacheMemory(it.b.mem, it.b.Addr, int(it.b.RealType.Size()))
+	it.b.Mem = CacheMemory(it.b.Mem, it.b.Addr, int(it.b.RealType.Size()))
 
 	it.tophashes = nil
 	it.keys = nil
@@ -2283,7 +2283,7 @@ func (v *Variable) readInterface() (_type, data *Variable, isnil bool) {
 	//
 	// The following code works for both runtime.iface and runtime.eface.
 
-	v.mem = CacheMemory(v.mem, v.Addr, int(v.RealType.Size()))
+	v.Mem = CacheMemory(v.Mem, v.Addr, int(v.RealType.Size()))
 
 	ityp := resolveTypedef(&v.RealType.(*godwarf.InterfaceType).TypedefType).(*godwarf.StructType)
 
@@ -2337,7 +2337,7 @@ func (v *Variable) loadInterface(recurseLevel int, loadData bool, cfg LoadConfig
 		return
 	}
 
-	mds, err := LoadModuleData(_type.bi, _type.mem)
+	mds, err := LoadModuleData(_type.bi, _type.Mem)
 	if err != nil {
 		v.Unreadable = fmt.Errorf("error loading module data: %v", err)
 		return
@@ -2358,7 +2358,7 @@ func (v *Variable) loadInterface(recurseLevel int, loadData bool, cfg LoadConfig
 		}
 	}
 
-	data = data.newVariable("data", data.Addr, typ, data.mem)
+	data = data.newVariable("data", data.Addr, typ, data.Mem)
 	if deref {
 		data = data.maybeDereference()
 		data.Name = "data"
@@ -2405,47 +2405,47 @@ func (v *Variable) registerVariableTypeConv(newtyp string) (*Variable, error) {
 		var child *Variable
 		switch newtyp {
 		case "int8":
-			child = newConstant(constant.MakeInt64(int64(int8(v.reg.Bytes[i]))), v.mem)
+			child = newConstant(constant.MakeInt64(int64(int8(v.reg.Bytes[i]))), v.Mem)
 			child.Kind = reflect.Int8
 			n = 1
 		case "int16":
-			child = newConstant(constant.MakeInt64(int64(int16(binary.LittleEndian.Uint16(v.reg.Bytes[i:])))), v.mem)
+			child = newConstant(constant.MakeInt64(int64(int16(binary.LittleEndian.Uint16(v.reg.Bytes[i:])))), v.Mem)
 			child.Kind = reflect.Int16
 			n = 2
 		case "int32":
-			child = newConstant(constant.MakeInt64(int64(int32(binary.LittleEndian.Uint32(v.reg.Bytes[i:])))), v.mem)
+			child = newConstant(constant.MakeInt64(int64(int32(binary.LittleEndian.Uint32(v.reg.Bytes[i:])))), v.Mem)
 			child.Kind = reflect.Int32
 			n = 4
 		case "int64":
-			child = newConstant(constant.MakeInt64(int64(binary.LittleEndian.Uint64(v.reg.Bytes[i:]))), v.mem)
+			child = newConstant(constant.MakeInt64(int64(binary.LittleEndian.Uint64(v.reg.Bytes[i:]))), v.Mem)
 			child.Kind = reflect.Int64
 			n = 8
 		case "uint8":
-			child = newConstant(constant.MakeUint64(uint64(v.reg.Bytes[i])), v.mem)
+			child = newConstant(constant.MakeUint64(uint64(v.reg.Bytes[i])), v.Mem)
 			child.Kind = reflect.Uint8
 			n = 1
 		case "uint16":
-			child = newConstant(constant.MakeUint64(uint64(binary.LittleEndian.Uint16(v.reg.Bytes[i:]))), v.mem)
+			child = newConstant(constant.MakeUint64(uint64(binary.LittleEndian.Uint16(v.reg.Bytes[i:]))), v.Mem)
 			child.Kind = reflect.Uint16
 			n = 2
 		case "uint32":
-			child = newConstant(constant.MakeUint64(uint64(binary.LittleEndian.Uint32(v.reg.Bytes[i:]))), v.mem)
+			child = newConstant(constant.MakeUint64(uint64(binary.LittleEndian.Uint32(v.reg.Bytes[i:]))), v.Mem)
 			child.Kind = reflect.Uint32
 			n = 4
 		case "uint64":
-			child = newConstant(constant.MakeUint64(binary.LittleEndian.Uint64(v.reg.Bytes[i:])), v.mem)
+			child = newConstant(constant.MakeUint64(binary.LittleEndian.Uint64(v.reg.Bytes[i:])), v.Mem)
 			child.Kind = reflect.Uint64
 			n = 8
 		case "float32":
 			a := binary.LittleEndian.Uint32(v.reg.Bytes[i:])
 			x := *(*float32)(unsafe.Pointer(&a))
-			child = newConstant(constant.MakeFloat64(float64(x)), v.mem)
+			child = newConstant(constant.MakeFloat64(float64(x)), v.Mem)
 			child.Kind = reflect.Float32
 			n = 4
 		case "float64":
 			a := binary.LittleEndian.Uint64(v.reg.Bytes[i:])
 			x := *(*float64)(unsafe.Pointer(&a))
-			child = newConstant(constant.MakeFloat64(x), v.mem)
+			child = newConstant(constant.MakeFloat64(x), v.Mem)
 			child.Kind = reflect.Float64
 			n = 8
 		default:
@@ -2461,7 +2461,7 @@ func (v *Variable) registerVariableTypeConv(newtyp string) (*Variable, error) {
 				}
 				n = n / 8
 			}
-			child = newConstant(constant.MakeString(fmt.Sprintf("%x", v.reg.Bytes[i:][:n])), v.mem)
+			child = newConstant(constant.MakeString(fmt.Sprintf("%x", v.reg.Bytes[i:][:n])), v.Mem)
 		}
 		v.Children = append(v.Children, *child)
 	}

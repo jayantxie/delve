@@ -440,7 +440,7 @@ func (t *Target) GetBufferedTracepoints() []*UProbeTraceResult {
 
 		cachedMem := CreateLoadedCachedMemory(ip.Data)
 		compMem, _ := CreateCompositeMemory(cachedMem, t.BinInfo().Arch, op.DwarfRegisters{}, ip.Pieces, ip.RealType.Common().ByteSize)
-		v.mem = compMem
+		v.Mem = compMem
 
 		// Load the value here so that we don't have to export
 		// loadValue outside of proc.

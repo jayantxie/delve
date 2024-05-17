@@ -105,7 +105,7 @@ func RuntimeTypeToDIE(_type *Variable, dataAddr uint64, mds []ModuleData) (typ g
 
 	// go 1.11 implementation: use extended attribute in debug_info
 
-	md := findModuleDataForType(bi, mds, _type.Addr, _type.mem)
+	md := findModuleDataForType(bi, mds, _type.Addr, _type.Mem)
 	if md != nil {
 		so := bi.moduleDataToImage(md)
 		if so != nil {
@@ -149,7 +149,7 @@ func resolveParametricType(bi *BinaryInfo, mem MemoryReadWriter, t godwarf.Type,
 	}
 	_type := newVariable("", rtypeAddr, runtimeType, bi, mem)
 
-	mds, err := LoadModuleData(bi, _type.mem)
+	mds, err := LoadModuleData(bi, _type.Mem)
 	if err != nil {
 		return ptyp.TypedefType.Type, fmt.Errorf("error loading module data: %v", err)
 	}
