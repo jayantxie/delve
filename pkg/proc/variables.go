@@ -602,6 +602,11 @@ func globalScope(tgt *Target, bi *BinaryInfo, image *Image, mem MemoryReadWriter
 	return &EvalScope{Location: Location{}, Regs: op.DwarfRegisters{StaticBase: image.StaticBase}, Mem: mem, g: nil, BinInfo: bi, target: tgt, frameOffset: 0}
 }
 
+// NewVariable creates a Variable.
+func NewVariable(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInfo, mem MemoryReadWriter) *Variable {
+	return newVariable(name, addr, dwarfType, bi, mem)
+}
+
 func newVariableFromThread(t Thread, name string, addr uint64, dwarfType godwarf.Type) *Variable {
 	return newVariable(name, addr, dwarfType, t.BinInfo(), t.ProcessMemory())
 }
@@ -1948,7 +1953,7 @@ func (v *Variable) loadFunctionPtr(recurseLevel int, cfg LoadConfig) {
 	}
 
 	v.Value = constant.MakeString(fn.Name)
-	cst := fn.closureStructType(v.bi)
+	cst := fn.ClosureStructType(v.bi)
 	v.Len = int64(len(cst.Field))
 
 	if recurseLevel <= cfg.MaxVariableRecurse {

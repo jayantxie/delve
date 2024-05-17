@@ -73,6 +73,8 @@ func CacheMemory(mem MemoryReadWriter, addr uint64, size int) MemoryReadWriter {
 	case *memCache:
 		if cacheMem.contains(addr, size) {
 			return mem
+		} else {
+			return &memCache{false, addr, make([]byte, size), cacheMem.mem}
 		}
 	case *compositeMemory:
 		return mem

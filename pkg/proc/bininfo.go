@@ -503,7 +503,7 @@ type Function struct {
 
 	// InlinedCalls lists all inlined calls to this function
 	InlinedCalls []InlinedCall
-	// closureStructType is the cached struct type for closures for this function
+	// closureStructTypeCached is the cached struct type for closures for this function
 	closureStructTypeCached *godwarf.StructType
 }
 
@@ -641,7 +641,7 @@ func (fn *Function) privateRuntime() bool {
 	return len(name) > n && name[:n] == "runtime." && !('A' <= name[n] && name[n] <= 'Z')
 }
 
-func (fn *Function) closureStructType(bi *BinaryInfo) *godwarf.StructType {
+func (fn *Function) ClosureStructType(bi *BinaryInfo) *godwarf.StructType {
 	if fn.closureStructTypeCached != nil {
 		return fn.closureStructTypeCached
 	}
