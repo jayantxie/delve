@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"go/constant"
+	"math/bits"
 )
 
 const heapInfoSize = 512
@@ -56,6 +57,30 @@ func (s *HeapScope) setHeapPtr(a Address) {
 	}
 	i := a % heapInfoSize / 4
 	h.ptr[i/64] |= uint64(1) << (i % 64)
+}
+
+// nextPtr returns next ptr address starts from a, returns 0 if not found.
+func (s *HeapScope) nextPtr(a Address, size int64) (Address, int64) {
+	ptrSize := int64(s.bi.Arch.PtrSize())
+	for {
+		h := s.findHeapInfo(a)
+		i := int64(a%heapInfoSize) / ptrSize
+		// j*ptrSize means offset to a
+		j := int64(bits.TrailingZeros64(h.ptr[i/64] >> (i % 64)))
+		// out of the size
+		if j*ptrSize >= size {
+			return 0, 0
+		}
+		// out of the heap info
+		if i+j >= (heapInfoSize / ptrSize) {
+			nextOff := int64(heapInfoSize - (a % heapInfoSize))
+			a = a.Add(nextOff)
+			size -= nextOff
+			continue
+		}
+		size -= j * ptrSize
+		return a.Add(j * ptrSize), size
+	}
 }
 
 // Heap info structures cover 9 bits of address.

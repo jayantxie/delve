@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"strings"
 
 	"github.com/go-delve/delve/pkg/dwarf/godwarf"
 )
@@ -113,7 +114,10 @@ func (s *ObjRefScope) findObject(idx *pprofIndex, addr Address, typ godwarf.Type
 		return nil
 	}
 	h.mark |= uint64(1) << b
-	mem = cacheMemory(mem, uint64(base), int(h.size))
+	if a, _ := s.nextPtr(base, h.size); a != 0 {
+		// has pointer, cache mem
+		mem = cacheMemory(mem, uint64(base), int(h.size))
+	}
 	v = &ReferenceVariable{
 		Addr:     uint64(addr),
 		RealType: resolveTypedef(typ),
@@ -125,13 +129,15 @@ func (s *ObjRefScope) findObject(idx *pprofIndex, addr Address, typ godwarf.Type
 	if addr > base || typ.Size() < h.size {
 		s.finalMark = append(s.finalMark, func() {
 			var size, count int64
-			for i := int64(0); i < h.size; i += int64(s.bi.Arch.PtrSize()) {
-				a := base.Add(i)
+			var a = base
+			var hsize = h.size
+			for {
+				a, hsize = s.nextPtr(a, hsize)
+				if a == 0 {
+					break
+				}
 				// explicit traversal known type
 				if a >= addr && a < addr.Add(typ.Size()) {
-					continue
-				}
-				if !s.isPtrFromHeap(a) {
 					continue
 				}
 				ptr, err := readUintRaw(mem, uint64(a), int64(s.bi.Arch.PtrSize()))
@@ -163,11 +169,16 @@ func (s *HeapScope) markObject(addr Address, mem MemoryReadWriter) (size, count 
 	}
 	h.mark |= uint64(1) << b
 	size, count = h.size, 1
-	mem = cacheMemory(mem, uint64(base), int(h.size))
-	for i := int64(0); i < h.size; i += int64(s.bi.Arch.PtrSize()) {
-		a := base.Add(i)
-		if !s.isPtrFromHeap(a) {
-			continue
+	if a, _ := s.nextPtr(base, h.size); a != 0 {
+		// has pointer, cache mem
+		mem = cacheMemory(mem, uint64(base), int(h.size))
+	}
+	var a = base
+	var hsize = h.size
+	for {
+		a, hsize = s.nextPtr(a, hsize)
+		if a == 0 {
+			break
 		}
 		ptr, err := readUintRaw(mem, uint64(a), int64(s.bi.Arch.PtrSize()))
 		if err != nil {
@@ -279,7 +290,7 @@ func (s *ObjRefScope) findRef(x *ReferenceVariable, idx *pprofIndex) {
 				tmp := it.key()
 				if key := s.directBucketObject(Address(tmp.Addr), resolveTypedef(tmp.RealType), DereferenceMemory(x.mem)); key != nil {
 					if !isPrimitiveType(key.RealType) {
-						key.Name = fmt.Sprintf("key%d", i)
+						key.Name = "mapkey"
 						s.findRef(key, idx)
 					} else {
 						x.size += key.size
@@ -293,7 +304,7 @@ func (s *ObjRefScope) findRef(x *ReferenceVariable, idx *pprofIndex) {
 				}
 				if val := s.directBucketObject(Address(tmp.Addr), resolveTypedef(tmp.RealType), DereferenceMemory(x.mem)); val != nil {
 					if !isPrimitiveType(val.RealType) {
-						val.Name = fmt.Sprintf("val%d", i)
+						val.Name = "mapval"
 						s.findRef(val, idx)
 					} else {
 						x.size += val.size
@@ -313,7 +324,6 @@ func (s *ObjRefScope) findRef(x *ReferenceVariable, idx *pprofIndex) {
 			x.count += y.count
 		}
 	case *godwarf.SliceType:
-		// mem = cacheMemory(mem, x.Addr, int(typ.Size()))
 		var base, cap_ uint64
 		var err error
 		for _, f := range typ.Field {
@@ -366,7 +376,6 @@ func (s *ObjRefScope) findRef(x *ReferenceVariable, idx *pprofIndex) {
 		}
 	case *godwarf.StructType:
 		typ = s.specialStructTypes(typ)
-		// cache mem
 		for _, field := range typ.Field {
 			fieldAddr := Address(x.Addr).Add(field.ByteOffset)
 			if !s.isValidAddr(x, fieldAddr) {
@@ -508,6 +517,10 @@ func (t *Target) ObjectReference(filename string) error {
 							RealType: l.RealType,
 							inStack:  true,
 							mem:      l.mem,
+						}
+						// TODO: fix me
+						if strings.Contains(root.Name, "runtime.selectgo") {
+							continue
 						}
 						ors.findRef(root, nil)
 					}
