@@ -406,6 +406,13 @@ If regex is specified only package variables with a name matching it will be ret
 	regs [-a]
 
 Argument -a shows more registers. Individual registers can also be displayed by 'print' and 'display'. See Documentation/cli/expr.md.`},
+		{aliases: []string{"objref"}, cmdFn: objref, group: dataCmds, helpMsg: `Output heap object reference relationships.
+
+	objref [<filename>]
+
+Argument <filename> represents the file to output all GC-reachable object reference relationships.
+The file is organized in pprof protobuf format, and can be opened by 'go tool pporf {filename}' command. See https://github.com/google/pprof/blob/main/proto/README.md.
+If argument <filename> is not specified, the default file name is 'objref.out'.`},
 		{aliases: []string{"exit", "quit", "q"}, cmdFn: exitCommand, helpMsg: `Exit the debugger.
 		
 	exit [-c]
@@ -2406,6 +2413,18 @@ func regs(t *Term, ctx callContext, args string) error {
 		return err
 	}
 	fmt.Fprintln(t.stdout, regs)
+	return nil
+}
+
+func objref(t *Term, ctx callContext, args string) error {
+	if args == "" {
+		args = "objref.out"
+	}
+	err := t.client.ObjectReference(args)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(t.stdout, "successly output to '%s'\n", args)
 	return nil
 }
 
