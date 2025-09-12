@@ -9,6 +9,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+
+	"github.com/go-delve/delve/pkg/internal/mmap"
 )
 
 // GetDebugSectionElf returns the data contents of the specified debug
@@ -16,20 +18,33 @@ import (
 // For example GetDebugSectionElf("line") will return the contents of
 // .debug_line, if .debug_line doesn't exist it will try to return the
 // decompressed contents of .zdebug_line.
-func GetDebugSectionElf(f *elf.File, name string) ([]byte, error) {
+func GetDebugSectionElf(f *elf.File, name string) (res []byte, err error) {
 	sec := f.Section(".debug_" + name)
 	if sec != nil {
-		return sec.Data()
+		res, err = sec.Data()
+		if err != nil {
+			return nil, fmt.Errorf("could not load .debug_%s section data, err=%v", name, err)
+		}
+	} else {
+		sec = f.Section(".zdebug_" + name)
+		if sec == nil {
+			return nil, fmt.Errorf("could not find .debug_%s or .zdebug_%s section", name, name)
+		}
+		tmp, err := sec.Data()
+		if err != nil {
+			return nil, fmt.Errorf("could not load .zdebug_%s section data, err=%v", name, err)
+		}
+		res, err = decompressMaybe(tmp)
+		if err != nil {
+			return nil, fmt.Errorf("could not decompress .zdebug_%s section data, err=%v", name, err)
+		}
 	}
-	sec = f.Section(".zdebug_" + name)
-	if sec == nil {
-		return nil, fmt.Errorf("could not find .debug_%s section", name)
-	}
-	b, err := sec.Data()
+	// convert heap data to mmap data
+	mf, err := mmap.NewMappedFile(res)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	return decompressMaybe(b)
+	return mf.MappedData(), nil
 }
 
 // GetDebugSectionPE returns the data contents of the specified debug

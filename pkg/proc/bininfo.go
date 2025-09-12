@@ -1660,41 +1660,39 @@ func loadBinaryInfoElf(bi *BinaryInfo, image *Image, path string, addr uint64, w
 	dwarfFile := elfFile
 
 	bi.loadBuildID(image, elfFile)
-	var debugInfoBytes []byte
-	var dwerr error
-	image.dwarf, dwerr = elfFile.DWARF()
-	if dwerr != nil {
-		var sepFile *os.File
-		var serr error
-		sepFile, dwarfFile, serr = bi.openSeparateDebugInfo(image, elfFile, bi.DebugInfoDirectories)
-		if serr != nil {
-			if len(bi.Images) <= 1 {
-				fmt.Fprintln(os.Stderr, "Warning: no debug info found, some functionality will be missing such as stack traces and variable evaluation.")
-			}
-			err := loadBinaryInfoGoRuntimeElf(bi, image, path, elfFile)
-			if err != nil {
-				return fmt.Errorf("could not read debug info (%v) and could not read go symbol table (%v)", dwerr, err)
-			}
-			return nil
-		}
-		image.sepDebugCloser = sepFile
-		image.dwarf, err = dwarfFile.DWARF()
-		if err != nil {
-			return err
-		}
-	}
 
-	debugInfoBytes, err = godwarf.GetDebugSectionElf(dwarfFile, "info")
+	debugAbbrevBytes, err := godwarf.GetDebugSectionElf(dwarfFile, "abbrev")
 	if err != nil {
 		return err
 	}
 
-	image.dwarfReader = image.dwarf.Reader()
+	debugRangesBytes, err := godwarf.GetDebugSectionElf(dwarfFile, "ranges")
+	if err != nil {
+		return err
+	}
+
+	debugStrBytes, err := godwarf.GetDebugSectionElf(dwarfFile, "str")
+	if err != nil {
+		return err
+	}
+
+	debugInfoBytes, err := godwarf.GetDebugSectionElf(dwarfFile, "info")
+	if err != nil {
+		return err
+	}
 
 	debugLineBytes, err := godwarf.GetDebugSectionElf(dwarfFile, "line")
 	if err != nil {
 		return err
 	}
+
+	dwarfData, err := dwarf.New(debugAbbrevBytes, nil, nil, debugInfoBytes, debugLineBytes, nil, debugRangesBytes, debugStrBytes)
+	if err != nil {
+		return err
+	}
+	image.dwarf = dwarfData
+	image.dwarfReader = image.dwarf.Reader()
+
 	debugLocBytes, _ := godwarf.GetDebugSectionElf(dwarfFile, "loc")
 	image.loclist2 = loclist.NewDwarf2Reader(debugLocBytes, bi.Arch.PtrSize())
 	debugLoclistBytes, _ := godwarf.GetDebugSectionElf(dwarfFile, "loclists")
